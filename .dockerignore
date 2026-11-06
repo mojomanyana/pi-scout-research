@@ -1,0 +1,13 @@
+**
+!Dockerfile
+!lib/
+!lib/*.mjs
+!research/
+!research/**
+!worker/
+!worker/*.mjs
+!worker/runtime/
+!worker/runtime/package.json
+!worker/runtime/package-lock.json
+worker/*.test.mjs
+worker/sdk-fixture.mjs

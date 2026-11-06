@@ -1,0 +1,58 @@
+{
+  "name": "pi-scout-research",
+  "version": "0.2.0",
+  "description": "Portable evidence-led research with private, branch-aware briefs for Pi",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24"
+  },
+  "files": [
+    "research",
+    "scout-public",
+    "extension",
+    "lib",
+    "README.md",
+    "SECURITY.md",
+    "scripts",
+    "worker/bridge.mjs",
+    "worker/index.mjs",
+    "worker/research.mjs",
+    "worker/session.mjs",
+    "worker/runtime",
+    "Dockerfile",
+    ".dockerignore",
+    "CHANGELOG.md"
+  ],
+  "pi": {
+    "skills": [
+      "./research",
+      "./scout-public"
+    ],
+    "extensions": [
+      "./extension/index.ts",
+      "./extension/worker.ts",
+      "./extension/briefs.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=1.4.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "bin": {
+    "scout-catalog": "./scripts/prepare-catalog.mjs",
+    "scout-worker-build": "./scripts/build-worker.mjs"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

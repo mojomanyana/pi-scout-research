@@ -1,0 +1,181 @@
+{
+  "package": "pi-scout-research",
+  "version": "0.2.0",
+  "archiveSha256": "62130766ebd6a7197cbffbd876568381de15bedcdbc016f450cbf502e61c5087",
+  "files": [
+    {
+      "path": ".dockerignore",
+      "sha256": "8ebd1403d6f0e0904e54c0e09825c232f0690f82df2eaf89d4482a39101ed96a",
+      "bytes": 200,
+      "archiveMode": 493
+    },
+    {
+      "path": "Dockerfile",
+      "sha256": "ebc73b50972071f2bcdb15d21ebf461b9918366c3aa2011452be77d44a64d07d",
+      "bytes": 573,
+      "archiveMode": 493
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "5e057dd8d61a1ae33c0123f18854bb27f52f8c5bea553bddd504ccdcda1282d5",
+      "bytes": 1087,
+      "archiveMode": 493
+    },
+    {
+      "path": "worker/runtime/package-lock.json",
+      "sha256": "2ed5abb337e8e908840f382dafeb63054362208d6e415786048d6706fa008dfa",
+      "bytes": 162377,
+      "archiveMode": 493
+    },
+    {
+      "path": "package.json",
+      "sha256": "9bc771e9c8094623b62d4962bc1449bba4c599f24139d59ff882af6fde6abda7",
+      "bytes": 1209,
+      "archiveMode": 493
+    },
+    {
+      "path": "worker/runtime/package.json",
+      "sha256": "944c8f2e31c621de2cc5e45a8ea9716947763f3f735d88f37ce87f86ccba8493",
+      "bytes": 210,
+      "archiveMode": 493
+    },
+    {
+      "path": "CHANGELOG.md",
+      "sha256": "796787813764d1bed1dfb33e17dfab5157563e54fe49950dfab0ee02189d2a7d",
+      "bytes": 1129,
+      "archiveMode": 420
+    },
+    {
+      "path": "README.md",
+      "sha256": "05b10eb10222eadbd974e99959a51feba79462276e6612789b7b73dd557ca2a4",
+      "bytes": 9273,
+      "archiveMode": 493
+    },
+    {
+      "path": "SECURITY.md",
+      "sha256": "f4d4b01ccf58a4c1ff9f4372a07110c026420011368b44a8366ffe6197734354",
+      "bytes": 5723,
+      "archiveMode": 493
+    },
+    {
+      "path": "research/SKILL.md",
+      "sha256": "03d7e3ca759eafc95803b4abb48dfcb9507b40bf5e3d6fa8b595694065f1877e",
+      "bytes": 5732,
+      "archiveMode": 493
+    },
+    {
+      "path": "scout-public/SKILL.md",
+      "sha256": "7646ea15bfb2c69fe0a0d1e32fd57f76d9714b10c2402895c65ead37a5a781c9",
+      "bytes": 1708,
+      "archiveMode": 493
+    },
+    {
+      "path": "worker/bridge.mjs",
+      "sha256": "5716099e51bf26195a97b8de5b01b180fecb4ed81f363f3709ded84acb5f4780",
+      "bytes": 3887,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/brief-reference.mjs",
+      "sha256": "034c600019ecd8cd91dbbab67fe5f2216fba9d9186e20fb5174490969da7ea79",
+      "bytes": 6652,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/brief.mjs",
+      "sha256": "ace82f17582b5909a93bd77ab1fa8a8e5b68b40737649c6c02c18c3cfc285f41",
+      "bytes": 3337,
+      "archiveMode": 493
+    },
+    {
+      "path": "scripts/build-worker.mjs",
+      "sha256": "72f4770c5cdb6f25e4baaa50c75ee586a4874ade38eebe7b8f15ec455af5f602",
+      "bytes": 1318,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/catalog.mjs",
+      "sha256": "e0534e6552195b68b6533c648264da39890146a6c892c640a4b41c0e5e048312",
+      "bytes": 3612,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/docker-worker.mjs",
+      "sha256": "1668a7f51c94040d4c647c9764dd29bc490e595359eca154eea50f53a0e9e819",
+      "bytes": 18191,
+      "archiveMode": 493
+    },
+    {
+      "path": "worker/index.mjs",
+      "sha256": "fdd8df0c8c0a2760873f5c97a0405e1d4eb82defabc7cfdf57fc01e719816d7a",
+      "bytes": 2280,
+      "archiveMode": 493
+    },
+    {
+      "path": "scripts/prepare-catalog.mjs",
+      "sha256": "346db161d1130e7ab640e3d35718f792601cf22df3fb5ba7aa144685a898c929",
+      "bytes": 1640,
+      "archiveMode": 493
+    },
+    {
+      "path": "worker/research.mjs",
+      "sha256": "ba666836d49300769a1af09c409fab0e5edd7f58f1651bd4e32bf3f2117437d2",
+      "bytes": 7931,
+      "archiveMode": 493
+    },
+    {
+      "path": "worker/session.mjs",
+      "sha256": "0bf299ba1b1520c63777fdb3163f36d3a07e601753b61d1f69464f4a12abec2f",
+      "bytes": 6474,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/web-profile.mjs",
+      "sha256": "fc4373711048794ca9968b5e264187d390fc8e5409b4a0408c31173dee75f9de",
+      "bytes": 3215,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/worker-protocol.mjs",
+      "sha256": "f6a94b07a4775a48fbd59e91a76e19554228e7fbc83ebb487f8f30839adb7385",
+      "bytes": 5741,
+      "archiveMode": 493
+    },
+    {
+      "path": "lib/worker-setup.mjs",
+      "sha256": "71e85be41cbc7a3f2047abb3e7cb69b9201164d66c5c1109c253b807624eba1e",
+      "bytes": 16741,
+      "archiveMode": 493
+    },
+    {
+      "path": "extension/briefs.ts",
+      "sha256": "60338b9420accaf872fbd67646c4728efd9e2af350e76aab8398049bf2a72115",
+      "bytes": 5676,
+      "archiveMode": 493
+    },
+    {
+      "path": "extension/index.ts",
+      "sha256": "0ba9ef5e98b32b7f3fc84d3d926d8f3c6d123d66ec90fbdbf53f99c1863e2eac",
+      "bytes": 6783,
+      "archiveMode": 493
+    },
+    {
+      "path": "extension/owner.ts",
+      "sha256": "a809c3f62797930c0572661d234de1bca50d43e84a826832486b769bd52b3202",
+      "bytes": 542,
+      "archiveMode": 493
+    },
+    {
+      "path": "extension/status.ts",
+      "sha256": "c7f5498df79f267dbe6fe10bba81d6111418b19df8f11feeb9e17fa6e93017d6",
+      "bytes": 2492,
+      "archiveMode": 493
+    },
+    {
+      "path": "extension/worker.ts",
+      "sha256": "bf2df7d87683e84924bb233a8b8508ed6a27d1c0bbf0f1a79c457748e4d3f803",
+      "bytes": 7102,
+      "archiveMode": 493
+    }
+  ]
+}

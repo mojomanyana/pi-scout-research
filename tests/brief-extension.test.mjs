@@ -1,0 +1,75 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { destinationIdentity } from '../lib/brief-reference.mjs';
+const host = process.env.SCOUT_PI_SDK_ROOT;
+const product = fileURLToPath(new URL('../', import.meta.url));
+const enabled = { skip: !host && 'Requires existing Pi SDK' };
+test('native local save/read and trusted peer resolver enforce branch, destination, lifecycle and exact evidence', enabled, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'scout-native-ref-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const before = Object.fromEntries(['PI_SCOUT_BRIEFS','PI_SCOUT_CATALOG','PI_SCOUT_WEB_PROFILE'].map(k=>[k,process.env[k]]));
+  process.env.PI_SCOUT_BRIEFS = join(root, 'briefs');
+  delete process.env.PI_SCOUT_CATALOG; delete process.env.PI_SCOUT_WEB_PROFILE;
+  t.after(() => { for(const [k,v] of Object.entries(before)) v === undefined ? delete process.env[k] : process.env[k]=v; });
+  const { loadExtensions, createExtensionRuntime } = await import(pathToFileURL(resolve(host,'dist/core/extensions/loader.js')));
+  const { createEventBus } = await import(pathToFileURL(resolve(host,'dist/core/event-bus.js')));
+  const bus = createEventBus(), runtime = createExtensionRuntime(), entries = [];
+  runtime.appendEntry = (customType, data) => entries.push({type:'custom',customType,data});
+  const loaded = await loadExtensions([join(product,'extension/index.ts'),join(product,'extension/briefs.ts')],root,bus,runtime);
+  assert.deepEqual(loaded.errors, []);
+  const [local, reader] = loaded.extensions;
+  const versions = [];
+  bus.emit('pi-daddy:ecosystem-versions:v1',{report:value=>versions.push(value)});
+  assert.deepEqual(versions.map(({id,version})=>({id,version})),[{id:'pi-scout-research',version:'0.2.0'}]);
+  let endpoint = 'https://provider.example/v1', branch = entries;
+  const ctx = { cwd:root, model:{provider:'fixture',id:'model',api:'fixture',baseUrl:endpoint},
+    modelRegistry:{getApiKeyAndHeaders:async()=>({ok:true,baseUrl:endpoint,apiKey:'never-retained'})},
+    sessionManager:{getSessionId:()=> 'source-session',getBranch:()=>branch} };
+  const invoke = (extension,name,args) => extension.tools.get(name).definition.execute('call',args,new AbortController().signal,undefined,ctx);
+  const saved = (await invoke(local,'research_brief',{question:'Fixture only',scope:'Selected sources',questions:[],doneWhen:'Return gaps',findings:[],gaps:['Unknown']})).details;
+  assert.equal(saved.saved,true);
+  assert.equal(entries[0].customType,'scout-brief-v2');
+  assert.equal(JSON.stringify(entries).includes('Fixture only'),false);
+  const read = await invoke(reader,'scout_brief_read',{reference:saved.reference});
+  assert.equal(read.details.complete,true);
+  assert.match(read.details.excerpt,/Fixture only/);
+  const [hook] = local.handlers.get('context');
+  const restored = await hook({messages:[]},ctx);
+  assert.equal(restored.messages[0].content.includes('Fixture only'),false);
+  endpoint = 'https://different.example/v1';
+  assert.equal((await invoke(reader,'scout_brief_read',{reference:saved.reference})).details.status,'denied');
+  endpoint = 'https://provider.example/v1'; branch = [];
+  assert.equal((await invoke(reader,'scout_brief_read',{reference:saved.reference})).details.status,'denied');
+  for (const h of reader.handlers.get('session_start')) await h({},ctx);
+  const resolveRef = (extra={}) => new Promise(reply=>bus.emit('scout:resolve:v1',{version:1,requestId:'fixture',sessionId:'source-session',cwd:root,reference:saved.reference,reply,...extra}));
+  assert.equal((await resolveRef()).status,'denied');
+  const target = await destinationIdentity(ctx);
+  const exact = ({reference,destination}) => JSON.stringify(reference)===JSON.stringify(saved.reference) && JSON.stringify(destination)===JSON.stringify(target);
+  const resolved = await resolveRef({authorize:exact});
+  assert.equal(resolved.ok,true);
+  assert.equal(resolved.sessionId,'source-session');
+  assert.equal(resolved.cwd,root);
+  await resolved.assertCurrent();
+  assert.equal((await resolveRef({sessionId:'wrong',authorize:exact})).status,'denied');
+  endpoint = 'https://different.example/v1';
+  await assert.rejects(resolved.assertCurrent(),/no longer/);
+  endpoint = 'https://provider.example/v1';
+  const again = await resolveRef({authorize:exact});
+  let switched = false;
+  const raced = await resolveRef({authorize:async details=>{
+    if (!switched) {
+      switched = true;
+      for(const h of reader.handlers.get('session_tree')) await h({},ctx);
+    }
+    return exact(details);
+  }});
+  assert.equal(raced.status,'denied');
+  assert.equal('excerpt' in raced,false);
+  for (const h of reader.handlers.get('session_shutdown')) await h({},ctx);
+  await assert.rejects(again.assertCurrent(),/no longer/);
+  assert.equal((await resolveRef({authorize:exact})).status,'denied');
+});

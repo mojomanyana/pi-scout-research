@@ -1,0 +1,10 @@
+{
+  "name": "pi-scout-worker-runtime",
+  "private": true,
+  "version": "0.1.0-dev.2",
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "pi-web-access": "0.38.0"
+  }
+}
