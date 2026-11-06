@@ -9,7 +9,7 @@ The skill does not depend on Principal, pi-daddy or skill-harness. Those package
 With Pi and Docker running on the same computer, install Scout:
 
 ```bash
-pi install npm:pi-scout-research@0.2.0
+pi install npm:pi-scout-research@0.2.1
 ```
 
 Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
@@ -27,7 +27,7 @@ export PI_SCOUT_DOCKER_PATH='/mnt/c/Program Files/Docker/Docker/resources/bin/do
 export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 ```
 
-`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.0 scout-worker-build`, but first-use preparation performs the same work automatically.
+`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.1 scout-worker-build`, but first-use preparation performs the same work automatically.
 
 Governed children need Scout in their selected resources and permission for `scout_research`; no Docker command or image parameter is supplied by the model. A child Pi with the tool loaded owns its worker lifecycle.
 
@@ -48,7 +48,7 @@ The parent checks the effective Docker configuration, validates source identitie
 
 `/skill:research` works without Docker using available Pi research tools. Installing the package alone does not isolate host tools. The `scout_research` tool always uses its Docker worker and prepares it automatically; Docker errors do not silently enable host web access.
 
-The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.2.0 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
+The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.2.1 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
 
 ```json
 [{"id":"release","title":"Release notes","path":"./release-notes.txt","locator":"local:release-notes.txt"}]
@@ -82,3 +82,17 @@ When Daddy is present, Scout contributes observed worker and retained-brief
 status to its terminal dashboard. This optional display connection creates no
 model calls, timer, dispatch authority or additional evidence store.
 
+
+
+## Source and development
+
+The MIT source is at [mojomanyana/pi-scout-research](https://github.com/mojomanyana/pi-scout-research).
+Version tags identify release source. Version 0.2.1 adds repository links and
+release metadata; research, worker and disclosure behavior are unchanged from
+0.2.0. The immutable 0.2.0 source anchor preserves the previously published
+package bytes.
+
+See the [offline test instructions](https://github.com/mojomanyana/pi-scout-research/blob/main/tests/README.md)
+and [source provenance](https://github.com/mojomanyana/pi-scout-research/blob/main/docs/SOURCE-PROVENANCE.md).
+The tests use synthetic Docker/model responses; running them does not make a
+model request or start Docker.

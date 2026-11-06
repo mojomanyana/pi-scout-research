@@ -1,6 +1,12 @@
 # Changelog
 
-## 0.2.0 — Unreleased
+## 0.2.1 — 2026-11-06
+
+- Link npm metadata to the public GitHub source, issues and README.
+- Add a public source history anchored to the exact previously published 0.2.0 payload, with existing offline controls and model-free CI.
+- Update installation examples. Research, worker, disclosure and permission behavior is unchanged.
+
+## 0.2.0 — 2026-11-06
 
 - Retain exact private brief references on the active Pi branch instead of restoring whole brief bodies; resolve only bounded requested excerpts with current destination and disclosure checks.
 - Add an optional trusted peer resolver and Daddy dashboard contribution without requiring Bookie, Principal or Daddy, granting authority, or adding model calls during restoration/display.
