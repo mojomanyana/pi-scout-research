@@ -24,7 +24,7 @@ test('native local save/read and trusted peer resolver enforce branch, destinati
   const [local, reader] = loaded.extensions;
   const versions = [];
   bus.emit('pi-daddy:ecosystem-versions:v1',{report:value=>versions.push(value)});
-  assert.deepEqual(versions.map(({id,version})=>({id,version})),[{id:'pi-scout-research',version:'0.2.0'}]);
+  assert.deepEqual(versions.map(({id,version})=>({id,version})),[{id:'pi-scout-research',version:'0.2.1'}]);
   let endpoint = 'https://provider.example/v1', branch = entries;
   const ctx = { cwd:root, model:{provider:'fixture',id:'model',api:'fixture',baseUrl:endpoint},
     modelRegistry:{getApiKeyAndHeaders:async()=>({ok:true,baseUrl:endpoint,apiKey:'never-retained'})},

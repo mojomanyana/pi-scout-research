@@ -1,6 +1,6 @@
 {
   "name": "pi-scout-research",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Portable evidence-led research with private, branch-aware briefs for Pi",
   "type": "module",
   "license": "MIT",
@@ -54,5 +54,13 @@
   "publishConfig": {
     "access": "public",
     "registry": "https://registry.npmjs.org/"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mojomanyana/pi-scout-research.git"
+  },
+  "homepage": "https://github.com/mojomanyana/pi-scout-research#readme",
+  "bugs": {
+    "url": "https://github.com/mojomanyana/pi-scout-research/issues"
   }
 }
