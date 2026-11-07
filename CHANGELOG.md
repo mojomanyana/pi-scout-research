@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 — 2026-11-07
+
+- Include the brief-reference helper in the Docker worker build context and image identity, fixing startup of workers that retain compact brief references. Add an import-closure and image-invalidation regression.
+- Clarify optional Bookie evidence reuse, parent-owned JEV advice and narrow Scout delegation. Existing accepted decisions remain authoritative; memory and source hashes do not grant approval or establish freshness.
+- Keep standalone Pi use and standard Docker boundaries unchanged. The exact worker inputs passed a scripted offline container check; this does not qualify live web research or model quality.
+
 ## 0.2.1 — 2026-11-06
 
 - Link npm metadata to the public GitHub source, issues and README.
