@@ -4,9 +4,9 @@ import { mkdtemp, mkdir, cp, writeFile, readFile, chmod, rm, appendFile, readdir
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { join } from 'node:path';
+import { join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createWorkerSetup } from '../lib/worker-setup.mjs';
 
@@ -88,6 +88,29 @@ function processRun(script, args, env) {
   });
 }
 
+test('Docker COPY inputs load and initialize the actual worker research module', async t => {
+  const root = await mkdtemp(join(tmpdir(), 'scout-copy-closure-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const dockerfile = await readFile(join(product, 'Dockerfile'), 'utf8');
+  for (const line of dockerfile.split(/\r?\n/).filter(line => line.startsWith('COPY '))) {
+    const parts = line.trim().split(/\s+/).slice(1), destination = parts.pop();
+    assert.ok(destination.startsWith('./'), 'The packaging fixture expects a relative COPY destination');
+    for (const source of parts) {
+      assert.ok(!source.startsWith('--') && !source.includes('*'), 'Handle new COPY syntax explicitly');
+      const directory = join(root, destination);
+      await mkdir(directory, { recursive: true });
+      await cp(join(product, source), join(directory, basename(source)));
+    }
+  }
+  const { createResearch } = await import(pathToFileURL(join(root, 'worker/research.mjs')).href);
+  const research = createResearch({ requestId: 'copy-closure', mode: 'offline',
+    question: 'What does the supplied evidence establish?', scope: 'Synthetic empty-source packaging check.', sources: [] }, join(root, 'briefs'));
+  await research.initialize();
+  assert.equal(research.currentBrief().version, 1);
+  assert.equal(research.hasModelBrief(), false);
+  assert.deepEqual(research.tools.map(tool => tool.name), ['research_sources', 'research_read', 'research_brief']);
+});
+
 test('cold build uses exact source identity; warm sessions reuse it and changed inputs rebuild', posix, async t => {
   const fx = await fixture(t), stages = [];
   const cold = await fx.run({ onProgress: event => stages.push(event.stage) });
@@ -99,6 +122,10 @@ test('cold build uses exact source identity; warm sessions reuse it and changed 
   const changed = await fx.run();
   assert.notEqual(changed.image, cold.image);
   assert.equal((await fx.calls()).filter(call => call.args.includes('build')).length, 2);
+  await appendFile(join(fx.packageRoot, 'lib', 'brief-reference.mjs'), '\n// Updated brief retention.\n');
+  const briefChanged = await fx.run();
+  assert.notEqual(briefChanged.image, changed.image, 'Brief reference code must be bound to the worker image');
+  assert.equal((await fx.calls()).filter(call => call.args.includes('build')).length, 3);
   assert.deepEqual(await readdir(fx.cacheRoot), []);
 });
 

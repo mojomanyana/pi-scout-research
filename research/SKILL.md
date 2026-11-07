@@ -13,6 +13,12 @@ Identify the question, relevant product/version/platform/date, and what a comple
 
 For a direct lookup, gather the relevant evidence and answer; no working brief or method preamble is needed. For substantial multi-step work, automatically save a short private brief when a research-brief capability is available: question, scope, sub-questions and completion criteria. Update it with supported findings and remaining gaps. Otherwise keep concise working notes in the session. Mention persistence limits only when they affect requested resumption or delivery. Never claim a save without confirmation; a shareable report remains opt-in.
 
+## Reuse the decision context
+
+Before asking again, check the supplied task and reachable exact references for the user's outcome, scope and accepted verification route. A saved summary can help locate that decision; it cannot grant authority or turn a proposed alternative into an accepted one. Read only what the current uncertainty requires. Reuse evidence whose source, applicability and freshness still fit; a matching hash alone does not establish current facts.
+
+When Bookie is available, use its selected-project context or exact evidence references within the existing disclosure scope. Without it, supplied sources and session notes suffice. When optional JEV workflow advice is already enabled, the coordinator may evaluate one proposed next step for a consequential unresolved choice, such as whether a public lookup would add useful evidence. Do not score every tool, consult on every call, or activate advice yourself. Advice does not establish facts, access or approval; unavailable advice does not block ordinary authorized research.
+
 ## Choose sources and gather
 
 Inspect available capabilities, including supported activation/discovery mechanisms. Prefer the most direct source: local source or lockfile for the current checkout, installed versioned code for behavior, a registry for published versions, original documents for external claims. Search broadly only when the question requires discovery; use precise queries when the source is already known.
