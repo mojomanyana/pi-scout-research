@@ -54,7 +54,7 @@ async function fixture(t, callback, setup = async ({ env }) => ({ image: env.PI_
     setThinking: value => { thinking = value; } };
 }
 
-test('Scout extension loads through the selected native Pi SDK and exposes only question/scope', enabled, async () => {
+test('Scout extension loads through the selected native Pi SDK and exposes question/scope plus optional source URLs', enabled, async () => {
   const { loadExtensions } = await sdkImport('dist/core/extensions/loader.js');
   const loaded = await loadExtensions([join(product, 'extension', 'worker.ts')], product);
   assert.deepEqual(loaded.errors, []);
@@ -62,7 +62,7 @@ test('Scout extension loads through the selected native Pi SDK and exposes only 
   const extension = loaded.extensions[0];
   assert.deepEqual([...extension.tools.keys()], ['scout_research']);
   const schema = extension.tools.get('scout_research').definition.parameters;
-  assert.deepEqual(Object.keys(schema.properties).sort(), ['question', 'scope']);
+  assert.deepEqual(Object.keys(schema.properties).sort(), ['question', 'scope', 'sourceUrls']);
   assert.equal(schema.additionalProperties, false);
   assert.equal(extension.handlers.get('context').length, 1);
 });
@@ -106,7 +106,7 @@ test('native-loaded extension captures model, forwards only worker context, save
     const brief = { version: 1, question: options.request.question, scope: options.request.scope,
       questions: [], doneWhen: 'State what is known', findings: [], gaps: ['Synthetic fixture has no sources'] };
     return { result: { type: 'result', version: 1, requestId: options.request.requestId,
-      status: 'complete', answer: 'Fixture completed.', brief, sources: [] },
+      status: 'incomplete', answer: 'Fixture findings retained.', brief, sources: [] },
       runtime: { cleanup: { confirmed: true }, modelCallbackSettled: true } };
   });
   const calls = [];

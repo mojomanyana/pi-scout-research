@@ -24,9 +24,22 @@ export function scoutStatus(pi: ExtensionAPI, kind: 'local' | 'worker') {
     }
     const saved = branchReferences(ctx.sessionManager.getBranch()).filter(item =>
       kind === 'worker' ? typeof item.requestId === 'string' : typeof item.requestId !== 'string').at(-1);
-    items = [{ id: 'research', kind: 'work', label: kind === 'worker' ? 'Scout Docker research' : 'Scout local evidence', state, details },
-      ...(saved ? [{ id: 'brief', kind: 'evidence', label: 'Exact research brief retained', state: 'observed',
-        reference: JSON.stringify(saved.reference), details: ['Untrusted evidence; semantic approval is not implied.'] }] : [])];
+    const incomplete = saved?.researchStatus === 'incomplete';
+    const partialCurrent = incomplete && ['observed', 'settled'].includes(state);
+    // Settled describes the worker lifecycle, not complete research coverage.
+    // Daddy maps an unobserved worker to "Docker untested", so keep that distinct
+    // from a retained partial brief whose cleanup has already settled.
+    const workState = partialCurrent ? 'settled' : state;
+    items = [{ id: 'research', kind: 'work', label: partialCurrent ? 'Scout research · partial findings saved'
+        : kind === 'worker' ? 'Scout Docker research' : 'Scout local evidence', state: workState,
+      details: partialCurrent && !details.length ? ['Saved evidence has unresolved gaps. No human decision is requested by this record.'] : details },
+      ...(saved ? [{ id: 'brief', kind: 'evidence', label: incomplete ? 'Partial research saved · gaps remain' : 'Exact research brief retained', state: 'observed',
+        reference: JSON.stringify(saved.reference), details: [incomplete ? (saved.researchIssue === 'BRIEF_UPDATE_REJECTED'
+          ? 'The last update was not saved. The previous validated draft is retained; research is incomplete.'
+          : 'Research is incomplete. Read the saved findings and gaps before continuing; do not treat this as task completion.')
+          : saved.researchStatus === 'complete' ? 'Research coverage reported complete; semantic approval is not implied.'
+          : 'Completion status was not recorded. Inspect the saved brief before reuse.',
+        'Untrusted evidence; semantic approval is not implied.'] }] : [])];
     send();
   };
   for (const event of ['session_start', 'session_switch', 'session_fork', 'session_tree'] as const) {

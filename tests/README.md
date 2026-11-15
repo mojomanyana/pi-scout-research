@@ -10,7 +10,7 @@ provider, and do not establish protected online egress or live research quality.
 
 Install direct test dependencies into a separate directory with scripts disabled:
 
-    npm install --prefix /tmp/scout-test-deps --ignore-scripts --no-audit --no-fund --save-exact @earendil-works/pi-coding-agent@1.5.0 @earendil-works/pi-ai@1.5.0 typebox@1.3.27 pi-daddy@0.50.0
+    npm install --prefix /tmp/scout-test-deps --ignore-scripts --no-audit --no-fund --save-exact @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-ai@1.5.2 typebox@1.4.7 pi-daddy@0.57.0
 
 From this repository root:
 
@@ -25,3 +25,12 @@ bounded diagnostics without secrets; cleanup, cancellation and owner transitions
 and independent parent/worker source catalogs. Worker source failures are injected
 into mock tools, and native Pi calls use synthetic responses. No test establishes
 that a historical remote research failure has been repaired or retries that run.
+
+The approved recovery batch adds checks for field-specific brief corrections,
+direct known URLs without a search prerequisite, incomplete evidence retention,
+honest partial references/dashboard state, unchanged failure and disclosure
+boundaries, and worker packaging. On 2026-11-15, the full suite passed 86/86 on
+Pi 1.5.2 with Daddy 0.57.0, and the affected native compatibility subset passed
+21/21 on Pi 1.4.0 with Daddy 0.57.0; neither run skipped a test. These are distinct
+runtime checks, not 107 unique scenarios. No fixture contacts the official URLs
+it names. Live search availability remains a separate question.
