@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.4 — 2026-11-15
+
+- Give the research worker safe, field-specific brief corrections, including
+  citation and size limits, so it can repair a rejected brief without guessing.
+- Accept optional exact public source URLs and explain direct official-page
+  fetching without a search prerequisite. Keep discovery, fetching and local
+  source configuration distinct.
+- Retain incomplete findings and explicit gaps without claiming research success.
+  On a normal model finish without a valid brief, retain gaps and bounded source
+  leads instead of treating unvalidated answer text as evidence. Preserve an
+  earlier valid draft unchanged when a final update is rejected, with the issue
+  recorded alongside its reference. Execution, cancellation and cleanup failures
+  remain failures.
+- Carry incomplete status with retained references and dashboard observations;
+  explain how callers can reuse supported findings and continue the missing check.
+
 ## 0.2.3 — 2026-11-15
 
 - Report actionable, static failure categories and next steps for worker setup,

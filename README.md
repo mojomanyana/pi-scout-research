@@ -2,14 +2,14 @@
 
 Scout provides a portable Pi research skill, source snapshots and private briefs. Its optional Docker worker lets an agent delegate a public research question through one tool, `scout_research`. Released under MIT.
 
-The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. The connector declares Pi 1.4.0 or later and Node 24 or later. Retained scripted native checks cover exact Pi 1.4.0 and 1.5.0 on Node 24.19.0; they do not qualify every later Pi version or live model quality. The worker pins Pi 1.4.0, Node 24.19.0 and pi-web-access 0.38.0.
+The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. The connector declares Pi 1.4.0 or later and Node 24 or later. Retained scripted native checks cover exact Pi 1.4.0 and 1.5.2 on Node 24.19.0; they do not qualify every later Pi version or live model quality. The worker pins Pi 1.4.0, Node 24.19.0 and pi-web-access 0.38.0.
 
 ## Use from Pi
 
 With Pi and Docker running on the same computer, install Scout:
 
 ```bash
-pi install npm:pi-scout-research@0.2.3
+pi install npm:pi-scout-research@0.2.4
 ```
 
 Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
@@ -18,7 +18,9 @@ The first preparation downloads the pinned Node/Pi/web runtime and npm dependenc
 
 Choose your normal Pi model. Ask, for example: “Use Scout to compare the current Node.js support policies for these two public libraries. Give me the relevant sources and uncertainty.” No special skill sequence is required. Scout captures the parent's selected model and thinking level at dispatch. Each model turn uses Pi's native provider/authentication support in the parent and consumes its normal usage allowance. Credentials stay outside the container.
 
-The tool accepts only `question` and `scope`. Send public material only. It starts a worker, returns a sourced answer and saves a private brief under `~/.pi-scout-research/briefs/`. The result includes the saved path, exact reference and cleanup confirmation. `PI_SCOUT_BRIEFS` can select another operator-owned root. Current-branch references are restored into Pi context after reload or compaction; brief bodies are retrieved only when needed. Notes from abandoned branches are not selected. Briefs are evidence, not approval or training labels.
+The tool accepts `question`, `scope` and optional `sourceUrls`. Send public material only. If you already know the relevant official documentation pages, provide up to six unique HTTPS URLs (each at most 2,000 characters after URL encoding, without credentials, spaces, control characters or fragments). In public mode, the worker can fetch those pages directly; search is not required first. URLs are starting points, not an endorsement of their publisher or contents. Offline mode does not accept public source URLs or fetch them.
+
+Scout saves a private brief under `~/.pi-scout-research/briefs/` and returns its saved path, exact reference and cleanup confirmation. A returned result may be complete or incomplete: retained partial findings and gaps remain useful without claiming the research question was answered. `PI_SCOUT_BRIEFS` can select another operator-owned root. Current-branch references are restored into Pi context after reload or compaction; brief bodies are retrieved only when needed. Notes from abandoned branches are not selected. Briefs are evidence, not approval or training labels.
 
 WSL automatically uses Docker Desktop's Windows client when the Linux client is missing or is the WSL integration placeholder. If an existing Docker client cannot reach its daemon, Scout reports that problem rather than choosing another daemon. Advanced operator overrides remain available:
 
@@ -27,7 +29,7 @@ export PI_SCOUT_DOCKER_PATH='/mnt/c/Program Files/Docker/Docker/resources/bin/do
 export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 ```
 
-`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.3 scout-worker-build`, but first-use preparation performs the same work automatically.
+`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.4 scout-worker-build`, but first-use preparation performs the same work automatically.
 
 Governed children need Scout in their selected resources and permission for `scout_research`; no Docker command or image parameter is supplied by the model. A child Pi with the tool loaded owns its worker lifecycle.
 
@@ -41,6 +43,12 @@ the external fact that remains unresolved. For example, checking an SDK's curren
 upload limit needs the public SDK/version and question, not the private handoff or
 the whole repository. Keep returned source and brief references available for the
 smallest relevant follow-up; recheck applicability when the question changes.
+
+When research is incomplete, carry its exact brief reference, incomplete status
+and unresolved reason into the product handoff. Reuse supported findings that still apply, and address
+the missing evidence instead of repeating the whole investigation. A dependent
+requirement stays open until its required evidence is available; a saved brief
+alone does not satisfy it.
 
 Harness's optional `jev_advice` may help the parent assess whether that proposed
 lookup is useful when workflow advice is already enabled. It does not select tools
@@ -60,7 +68,30 @@ The parent checks the effective Docker configuration, validates source identitie
 
 **Public mode does not guarantee that every outbound URL, redirect or query is approved.** It does not enforce confidentiality of supplied text. OpenShell is not required. Strict protected online mode remains separate and unqualified. See [SECURITY.md](SECURITY.md).
 
-## When research fails
+## Incomplete research and failures
+
+Research can return useful evidence without resolving the whole question. Scout
+marks a result `incomplete` when the brief has gaps, unverified claims, no
+findings, or a rejected final update. A result without those conditions is `complete`, but that label does not
+independently verify the model's interpretation or approve a product decision.
+The caller should state what is usable, what is missing and the smallest next
+check. Source search and direct fetching are separate capabilities: a failed
+search need not prevent fetching an already-known official page within the
+agreed scope.
+
+Brief validation gives the worker bounded correction guidance for field limits,
+source IDs, line ranges, exact quotations and size constraints. It must preserve
+the supplied question and scope. If the model ends normally without saving a
+valid brief, Scout retains an explicitly incomplete receipt with gaps and the exact
+unassessed source locators that fit. Full source snapshots remain in the original
+tool result; the receipt does not retain them. It does not turn unvalidated answer
+text into findings. If a later brief update was rejected, Scout preserves the
+earlier valid draft unchanged and records that issue alongside its reference.
+Carry this incomplete status and reason with the reference when handing work off:
+the older draft alone does not describe the rejected update.
+Provider errors, cancellation and unconfirmed cleanup remain execution failures,
+not recovered research. Retention never relaxes session, branch or destination
+checks.
 
 Scout returns a failed tool result with a short explanation, a next step, and the
 cleanup state. It saves the same bounded diagnostic in the current Pi session as
@@ -71,14 +102,15 @@ unclassified failure. Automatic setup rebuilds when the packaged worker changes.
 
 Earlier search/fetch failures may be listed separately when a later step fails.
 They can be recovered during research and do not prove the final failure's cause.
-Unknown causes remain unknown. There are no automatic retries or host-tool fallbacks.
+Unknown causes remain unknown. There are no automatic worker retries or host-tool fallbacks.
 Unconfirmed cleanup or model settlement continues to block another worker.
 
 The parent `research_sources` list describes its local configured sources. It is
 separate from sources discovered inside `scout_research`. An empty local list is
 valid and does not establish why a public worker failed.
 
-Diagnostics contain static categories and lifecycle facts only. They do not retain
+Failure diagnostics contain static categories and lifecycle facts; brief correction
+guidance identifies the invalid field and an allowed correction. Neither forwards
 raw exception text, provider responses, credentials, query text or command arguments.
 If the session changes before failure, diagnostics are withheld from the new branch.
 
@@ -117,7 +149,8 @@ carry the new destination binding. This does not remove earlier tool messages,
 assistant prose or compaction summaries from Pi history.
 
 When Daddy is present, Scout contributes observed worker and retained-brief
-status to its terminal dashboard. This optional display connection creates no
+status to its terminal dashboard, including whether retained research is incomplete.
+This optional display connection creates no
 model calls, timer, dispatch authority or additional evidence store.
 
 

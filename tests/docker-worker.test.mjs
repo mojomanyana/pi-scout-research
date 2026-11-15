@@ -10,7 +10,7 @@ const IMAGE = 'sha256:' + 'a'.repeat(64), ID = 'b'.repeat(64);
 const model = { provider: 'fixture', id: 'model', name: 'Fixture', reasoning: false, input: ['text'],
   contextWindow: 4096, maxTokens: 512, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
 const request = { type: 'start', version: 1, mode: 'offline', requestId: 'fixture-request', question: 'What evidence is available?', scope: 'Supplied sources only', sources: [], model };
-const complete = () => ({ type: 'result', version: 1, requestId: request.requestId, status: 'complete', answer: 'No source was supplied.',
+const complete = () => ({ type: 'result', version: 1, requestId: request.requestId, status: 'incomplete', answer: 'No source was supplied.',
   sources: [], brief: { question: request.question, scope: request.scope, questions: [], doneWhen: 'Identify evidence gaps', findings: [], gaps: ['No source supplied'] } });
 
 function fakeDocker(options = {}) {
@@ -76,13 +76,14 @@ function runOptions(overrides = {}) {
     limits: { commandMs: 300, wallMs: 2000, drainMs: 50 }, ...overrides };
 }
 
-test('broker transports one native answer and only releases completion after owned cleanup', async () => {
+test('broker transports partial findings and only releases the result after owned cleanup', async () => {
   const fake = fakeDocker(); let calls = 0;
   const answer = await fake.run(runOptions({ onModelRequest: async (context, signal) => {
     calls++; assert.equal(context.systemPrompt, 'Synthetic'); assert.equal(signal.aborted, false);
     return { role: 'assistant', content: [{ type: 'text', text: 'Public draft' }] };
   } }));
   assert.equal(calls, 1); assert.equal(answer.result.answer, complete().answer);
+  assert.equal(answer.result.status, 'incomplete');
   assert.equal(answer.runtime.cleanup.confirmed, true); assert.equal(fake.state.exists, false);
   assert.equal(answer.runtime.modelCallbackSettled, true); assert.equal(answer.runtime.semanticApproval, false);
   assert.equal(fake.state.modelResponses[0].message.role, 'assistant');

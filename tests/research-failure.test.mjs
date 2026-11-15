@@ -17,7 +17,8 @@ const invoke = (research, name, args, executeTool = async () => { throw Error(se
   research.tools.find(tool => tool.name === name).execute('fixture-call', args, undefined, undefined, { executeTool });
 const classified = code => error => {
   assert.equal(error.code, code);
-  assert.equal(error.message, diagnostic(code).summary);
+  if (code === 'BRIEF_INVALID') assert.ok(error.message.startsWith(diagnostic(code).summary));
+  else assert.equal(error.message, diagnostic(code).summary);
   assert.equal(error.cause, undefined);
   assert.doesNotMatch(JSON.stringify(error) + error.message, /secret-provider-token|private\/catalog/);
   return true;
@@ -65,7 +66,7 @@ test('fetch status, locator, text and snapshot limits are classified without ret
     await assert.rejects(invoke(research, 'research_fetch', { url: 'https://example.invalid/' }, async () => outcome), classified(code));
   }
   let calls = 0;
-  await assert.rejects(invoke(research, 'research_fetch', { url: 'https://secret-provider-token:password@example.invalid/' }, async () => { calls++; }), classified('SOURCE_FETCH_FAILED'));
+  await assert.rejects(invoke(research, 'research_fetch', { url: 'https://secret-provider-token:password@example.invalid/' }, async () => { calls++; }), classified('SOURCE_URLS_INVALID'));
   assert.equal(calls, 0);
   assert.deepEqual(research.sources(), []);
 });
@@ -152,8 +153,7 @@ test('session terminal failures keep static model/output codes and always dispos
     [{ messages: [{ role: 'assistant', stopReason: 'length', errorMessage: secret }] }, {}, 'MODEL_INCOMPLETE'],
     [{ messages: [{ role: 'assistant', stopReason: 'error', errorMessage: secret }] }, { failureCode: 'MODEL_RESPONSE_INVALID' }, 'MODEL_RESPONSE_INVALID'],
     [{ answer: ' ' }, {}, 'ANSWER_MISSING'],
-    [{}, {}, 'BRIEF_MISSING'],
-    [{ shutdownError: true, disposeError: true }, {}, 'BRIEF_MISSING'],
+    [{ shutdownError: true, disposeError: true }, {}, 'WORKER_FAILED'],
     [{ shutdownError: true, prompt: async tools => tools.find(tool => tool.name === 'research_brief').execute('fixture', brief) }, {}, 'WORKER_FAILED'],
     [{ disposeError: true, prompt: async tools => tools.find(tool => tool.name === 'research_brief').execute('fixture', brief) }, {}, 'WORKER_FAILED'],
   ];
@@ -164,23 +164,34 @@ test('session terminal failures keep static model/output codes and always dispos
   }
 });
 
-test('session attaches recoverable observations only to terminal failure, never a successful result', async t => {
+test('normal session finish retains missing or corrected briefs as incomplete without extra calls', async t => {
   for (const recover of [false, true]) {
     const scenario = { prompt: async tools => {
       await assert.rejects(tools.find(tool => tool.name === 'research_brief').execute('fixture', { ...brief, question: secret }), classified('BRIEF_INVALID'));
       if (recover) await tools.find(tool => tool.name === 'research_brief').execute('fixture', brief);
     } };
     const { root, runResearch } = await sessionFixture(t, scenario);
-    if (recover) {
-      const completed = await runResearch({ ...request, mode: 'offline' }, {}, { cwd: root });
-      assert.equal(completed.status, 'complete');
-      assert.equal(Object.hasOwn(completed, 'observedFailures'), false);
-    } else {
-      await assert.rejects(runResearch({ ...request, mode: 'offline' }, {}, { cwd: root }), error => {
-        classified('BRIEF_MISSING')(error);
-        assert.deepEqual(error.observedFailures, ['BRIEF_INVALID']); return true;
-      });
+    const completed = await runResearch({ ...request, mode: 'offline' }, {}, { cwd: root });
+    assert.equal(completed.status, 'incomplete');
+    assert.equal(Object.hasOwn(completed, 'observedFailures'), false);
+    assert.deepEqual(completed.brief.findings, []);
+    if (!recover) {
+      assert.match(completed.brief.gaps.join(' '), /without a valid model-authored brief/);
+      assert.match(completed.brief.gaps.join(' '), /question/);
+      assert.doesNotMatch(JSON.stringify(completed), /secret-provider-token/);
     }
     assert.equal(scenario.shutdown, true); assert.equal(scenario.disposed, true);
   }
+});
+
+test('normal finish without a brief retains a minimal gap receipt and ignores final-answer claims', async t => {
+  const scenario = { answer: 'Unsupported claim: all accessibility checks passed.' };
+  const { root, runResearch } = await sessionFixture(t, scenario);
+  const completed = await runResearch({ ...request, mode: 'offline' }, {}, { cwd: root });
+  assert.equal(completed.status, 'incomplete');
+  assert.deepEqual(completed.brief.findings, []);
+  assert.match(completed.brief.gaps[0], /without a valid model-authored brief/);
+  assert.doesNotMatch(completed.answer, /all accessibility checks passed/);
+  assert.equal(completed.usage.modelCalls, 0, 'No fallback model call');
+  assert.equal(scenario.shutdown, true); assert.equal(scenario.disposed, true);
 });

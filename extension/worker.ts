@@ -23,10 +23,12 @@ export default function scoutWorker(pi: ExtensionAPI) {
   let cleanupBlocked = false;
   pi.registerTool({
     name: 'scout_research', label: 'Scout research',
-    description: 'Research a public question in a separate Docker worker and return a sourced brief. Use for external facts, documentation, comparisons and investigation. Send only an explicit public question and scope, never private repository contents, credentials or conversation history. The worker uses the current Pi model through the parent; Docker public mode does not enforce every outbound URL. No publishing or implementation work.',
+    description: 'Research a public question in a separate Docker worker and return a sourced brief, explicitly incomplete when gaps remain. Use for external facts, documentation, comparisons and investigation. Optionally supply known exact official documentation URLs in sourceUrls so the worker can fetch them directly without a search prerequisite. Send only public question, scope and URLs, never private repository contents, credentials or conversation history. The worker uses the current Pi model through the parent; Docker public mode does not enforce every outbound URL. No publishing or implementation work.',
     parameters: Type.Object({
       question: Type.String({ minLength: 1, maxLength: 4000 }),
       scope: Type.String({ minLength: 1, maxLength: 4000 }),
+      sourceUrls: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 2000 }), { maxItems: 6, uniqueItems: true,
+        description: 'Known exact public HTTPS source URLs; no credentials or fragments. Public mode only. These are retrieval targets, not proof of official ownership or evidence already checked.' })),
     }, { additionalProperties: false }),
     async execute(_id, args, signal, update, ctx) {
       if (!ctx.model) throw new Error('Select a Pi model before invoking Scout');
@@ -79,20 +81,36 @@ export default function scoutWorker(pi: ExtensionAPI) {
         try { saved = await briefs.save(owner.sessionId, completed.result.brief); }
         catch { throw Object.assign(scoutFailure('BRIEF_STORAGE_FAILED'), { runtime: completed.runtime }); }
         const currentDestination = await destinationIdentity(ctx);
-        if (!owner.current()) return { content: [{ type: 'text', text: 'Scout completed for the previous session branch. Its brief was retained under the original owner; output is withheld from the new branch.' }],
+        if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
+        const incomplete = completed.result.status === 'incomplete';
         pi.appendEntry('scout-worker-brief-v2', { requestId: request.requestId,
-          reference: saved.reference, destination, image, mode });
-        observe(ctx, 'settled', ['Worker cleanup confirmed; brief retained.']);
+          reference: saved.reference, destination, image, mode,
+          ...(completed.result.issue ? { researchIssue: completed.result.issue } : {}),
+          researchStatus: incomplete ? 'incomplete' : (completed.result.status === 'complete' ? 'complete' : 'unknown') });
+        observe(ctx, incomplete ? 'observed' : 'settled', [incomplete
+          ? 'Partial findings saved; gaps remain. Worker cleanup confirmed. No human decision is requested by this record.'
+          : 'Worker cleanup confirmed; brief retained.']);
         if (JSON.stringify(currentDestination) !== JSON.stringify(destination)) {
-          return { content: [{ type: 'text', text: 'Scout completed and saved its brief, but the model destination changed. Retrieve the exact reference only after authorizing the new destination.' }],
+          return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: 'Scout saved its research record, but the model destination changed. Retrieve the exact reference only after authorizing the new destination.' }],
             details: { briefReference: saved.reference, outputWithheld: true, cleanup: completed.runtime.cleanup,
               semanticApproval: false, protectedOnline: false } };
         }
-        const details = { ...completed, briefPath: saved.path, briefSha256: saved.sha256,
+        const brief = completed.result.brief;
+        const short = (value: string) => value.length > 300 ? `${value.slice(0, 299)}…` : value;
+        const partialAnswer = incomplete ? [
+          'Scout research is incomplete. A research record was saved; this is not task completion.',
+          ...(completed.result.issue === 'BRIEF_UPDATE_REJECTED' ? ['The final brief update was not saved. This reference retains the previous validated draft unchanged; it does not include the rejected update.'] : []),
+          `Evidence-cited findings: ${brief.findings.filter((finding: any) => finding.status !== 'unverified').length}; unverified findings: ${brief.findings.filter((finding: any) => finding.status === 'unverified').length}. Citation validation is not independent approval.`,
+          ...brief.findings.slice(0, 3).map((finding: any) => `- ${finding.status}: ${short(finding.claim)}`),
+          ...brief.gaps.slice(0, 3).map((gap: string) => `Gap: ${short(gap)}`),
+          'Next: read the saved brief for the full evidence and gaps. Use only what supports the task; address the missing evidence before claiming research complete. Do not repeat completed retrievals automatically.',
+        ].join('\n') : undefined;
+        const details = { ...completed, ...(incomplete ? { result: { ...completed.result, answer: partialAnswer }, partialAvailable: true } : {}),
+          researchStatus: completed.result.status ?? 'unknown', briefPath: saved.path, briefSha256: saved.sha256,
           briefReference: saved.reference,
           semanticApproval: false, protectedOnline: false };
-        return { content: [{ type: 'text', text: `${completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.` }], details };
+        return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.` }], details };
       } catch (error) {
         if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false)) {
           cleanupBlocked = true;
