@@ -50,7 +50,7 @@ async function fixture(t, callback, setup = async ({ env }) => ({ image: env.PI_
   const loaded = await loadExtensions([join(root, 'extension', 'worker.ts')], root, bus, runtime);
   assert.deepEqual(loaded.errors, []);
   const extension = loaded.extensions[0];
-  return { root, extension, bus, tool: extension.tools.get('scout_research').definition, entries,
+  return { root, extension, bus, runtime, tool: extension.tools.get('scout_research').definition, entries,
     setThinking: value => { thinking = value; } };
 }
 
@@ -156,6 +156,7 @@ test('first use without setup variables prepares Docker before dispatch and allo
     launches++;
     assert.equal(options.image, image);
     assert.equal(options.request.mode, 'public');
+    assert.deepEqual(options.request.sources, [], 'Public worker setup does not require a parent source catalog');
     assert.equal(options.dockerPath, 'detected-docker');
     assert.deepEqual(options.dockerArgs, ['--host', 'fixture-endpoint']);
     return { result: { answer: 'Public fixture answer.', brief: { version: 1, question: 'Public', scope: 'Fixture',
@@ -165,7 +166,7 @@ test('first use without setup variables prepares Docker before dispatch and allo
     assert.equal(env.PI_SCOUT_WORKER_MODE, undefined);
     setups++;
     onProgress({ stage: 'checking' });
-    if (setups === 1) throw new Error('Docker is not running. Start Docker and try again.');
+    if (setups === 1) throw Object.assign(new Error('Docker is not running. Start Docker and try again.'), { code: 'DOCKER_UNAVAILABLE' });
     onProgress({ stage: 'building' });
     return { image, mode: 'public', dockerPath: 'detected-docker', dockerArgs: ['--host', 'fixture-endpoint'] };
   }, { PI_SCOUT_WORKER_IMAGE: undefined, PI_SCOUT_WORKER_MODE: undefined });
@@ -173,7 +174,11 @@ test('first use without setup variables prepares Docker before dispatch and allo
   const ctx = { model, sessionManager: { getSessionId: () => 'auto-session', getBranch: () => fx.entries } };
   const invoke = () => fx.tool.execute('auto', { question: 'Public', scope: 'Fixture' }, new AbortController().signal,
     update => progress.push(update.content[0].text), ctx);
-  await assert.rejects(invoke(), /Start Docker/);
+  const failed = await invoke();
+  assert.equal(failed.isError, true);
+  assert.equal(failed.details.failure.code, 'DOCKER_UNAVAILABLE');
+  assert.match(failed.content[0].text, /Start Docker/);
+  assert.equal(fx.entries[0].customType, 'scout-worker-failure-v1');
   assert.equal(launches, 0);
   const result = await invoke();
   assert.equal(launches, 1);
@@ -189,10 +194,13 @@ test('an unsettled worker blocks another invocation and cannot publish a brief',
   });
   const ctx = { model, sessionManager: { getSessionId: () => 'cleanup-owner' } };
   const invoke = () => fx.tool.execute('one', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
-  await assert.rejects(invoke(), /Synthetic cleanup failure/);
+  const failed = await invoke();
+  assert.equal(failed.isError, true);
+  assert.equal(failed.details.failure.code, 'CLEANUP_FAILED');
+  assert.equal(failed.details.failure.furtherWorkBlocked, true);
   await assert.rejects(invoke(), /did not settle/);
   assert.equal(launches, 1);
-  assert.equal(fx.entries.length, 0);
+  assert.deepEqual(fx.entries.map(entry => entry.customType), ['scout-worker-failure-v1']);
 });
 
 test('a changed effective model destination withholds completed worker output but preserves its original brief binding', enabled, async t => {
@@ -222,11 +230,14 @@ test('unsettled setup prevents duplicate builds or worker launches in the same s
   });
   const invoke = () => fx.tool.execute('one', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined,
     { model, sessionManager: { getSessionId: () => 'setup-owner' } });
-  await assert.rejects(invoke(), /did not settle/);
+  const failed = await invoke();
+  assert.equal(failed.isError, true);
+  assert.equal(failed.details.failure.code, 'SETUP_UNSETTLED');
+  assert.equal(failed.details.failure.furtherWorkBlocked, true);
   await assert.rejects(invoke(), /earlier Scout setup/);
   assert.equal(preparations, 1);
   assert.equal(launches, 0);
-  assert.equal(fx.entries.length, 0);
+  assert.deepEqual(fx.entries.map(entry => entry.customType), ['scout-worker-failure-v1']);
 });
 
 test('session or branch changes during worker completion withhold output and do not grant the new branch a reference', enabled, async t => {
@@ -265,4 +276,131 @@ test('a broken optional dashboard publisher cannot fail research or leave its wo
   for(const handler of fx.extension.handlers.get('session_tree')) await handler({},ctx);
   assert.equal((await invoke()).details.runtime.cleanup.confirmed,true);
   assert.equal(calls,2);
+});
+
+test('native Pi tool execution preserves failure status and a bounded session receipt without raw diagnostics', enabled, async t => {
+  const secret = 'Authorization: test-secret-never-disclose';
+  const fx = await fixture(t, async () => {
+    throw Object.assign(new Error(secret.repeat(10000)), {
+      code: 'WORKER_ERROR', stack: secret, cause: { token: secret },
+      runtime: { cleanup: { confirmed: true }, modelCallbackSettled: true,
+        commands: [{ argv: ['/private/docker-path', '--host', secret] }],
+        failure: { code: 'BRIEF_MISSING', origin: 'worker-reported', summary: secret,
+          observedFailures: ['SOURCE_FETCH_FAILED', secret] } },
+    });
+  });
+  const ctx = { model, sessionManager: { getSessionId: () => 'failure-owner', getBranch: () => fx.entries } };
+  const require = createRequire(join(sdk, 'package.json'));
+  const packagePath = require.resolve.paths('@earendil-works/pi-agent-core')
+    .map(base => join(base, '@earendil-works/pi-agent-core/package.json')).find(existsSync);
+  assert.ok(packagePath, 'The selected Pi SDK must have its native agent core');
+  const { runToolCall } = await import(pathToFileURL(join(dirname(packagePath), 'dist/agent-loop.js')));
+  assert.equal(typeof runToolCall, 'function');
+  const tool = { ...fx.tool, execute: (...args) => fx.tool.execute(...args, ctx) };
+  const outcome = await runToolCall({ id: 'native-failure', name: 'scout_research', arguments: { question: 'Never retain this public question', scope: 'Never retain this scope' } }, {
+    tools: [tool], assistantMessage: { role: 'assistant', content: [], stopReason: 'toolUse' },
+    context: { messages: [], tools: [tool] }, signal: new AbortController().signal,
+  });
+  assert.equal(outcome.isError, true);
+  assert.equal(outcome.result.isError, true);
+  assert.equal(outcome.result.details.failure.code, 'BRIEF_MISSING');
+  assert.equal(outcome.result.details.failure.cleanup, 'confirmed');
+  assert.equal(outcome.result.details.failure.modelSettled, true);
+  assert.deepEqual(outcome.result.details.failure.observedFailures, ['SOURCE_FETCH_FAILED']);
+  assert.equal(outcome.result.details.retained, true);
+  assert.deepEqual(fx.entries.map(entry => entry.customType), ['scout-worker-failure-v1']);
+  assert.deepEqual(fx.entries[0].data, outcome.result.details.failure);
+  const serialized = JSON.stringify({ result: outcome.result, entries: fx.entries });
+  for (const value of [secret, '/private/docker-path', 'Never retain this']) assert.equal(serialized.includes(value), false);
+  assert.ok(serialized.length < 6000);
+  await assert.rejects(readdir(join(fx.root, 'briefs')), { code: 'ENOENT' });
+  const [contextHook] = fx.extension.handlers.get('context');
+  assert.equal(await contextHook({ messages: [] }, ctx), undefined, 'A failure receipt is not a successful brief or model-context instruction');
+});
+
+test('session and branch changes during failure cannot append or publish diagnostics to the new owner', enabled, async t => {
+  for (const event of ['session_switch', 'session_tree']) {
+    let fx, ctx, sessionId = 'old-owner';
+    const publications = [];
+    fx = await fixture(t, async () => {
+      if (event === 'session_switch') sessionId = 'new-owner';
+      for (const handler of fx.extension.handlers.get(event)) await handler({}, ctx);
+      publications.length = 0;
+      throw Object.assign(new Error('Private failure content'), { code: 'SOURCE_FETCH_FAILED', runtime: { cleanup: { confirmed: true } } });
+    });
+    fx.bus.on('pi-daddy:dashboard-source:v1', request => request.reply({ ok: true, publish: value => publications.push(value), close() {} }));
+    ctx = { cwd: fx.root, model, sessionManager: { getSessionId: () => sessionId, getBranch: () => fx.entries } };
+    const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+    assert.equal(result.isError, true);
+    assert.equal(result.details.outputWithheld, true);
+    assert.equal(result.details.reason, 'owner-changed');
+    assert.equal(JSON.stringify(result).includes('Private failure content'), false);
+    assert.equal(fx.entries.length, 0);
+    assert.equal(publications.length, 0);
+  }
+});
+
+test('destination changes during failure expose only static diagnostics, never the prior provider response', enabled, async t => {
+  let endpoint = 'https://original.example/v1';
+  const fx = await fixture(t, async () => {
+    endpoint = 'https://replacement.example/v1';
+    throw Object.assign(new Error('Prior provider private response'), { code: 'MODEL_REQUEST_FAILED', runtime: { cleanup: { confirmed: true } } });
+  });
+  const ctx = { model, modelRegistry: { getApiKeyAndHeaders: async () => ({ ok: true, baseUrl: endpoint }) },
+    sessionManager: { getSessionId: () => 'same-owner', getBranch: () => fx.entries } };
+  const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+  assert.equal(result.isError, true);
+  assert.equal(result.details.failure.code, 'MODEL_REQUEST_FAILED');
+  assert.equal(result.details.retained, true);
+  const serialized = JSON.stringify({ result, entries: fx.entries });
+  for (const text of ['Prior provider private response', 'original.example', 'replacement.example']) assert.equal(serialized.includes(text), false);
+});
+
+test('failure receipt persistence failure does not hide the original category or claim retention', enabled, async t => {
+  const fx = await fixture(t, async () => { throw Object.assign(new Error('Private source error'), { code: 'SOURCE_FETCH_FAILED', runtime: { cleanup: { confirmed: true } } }); });
+  fx.runtime.appendEntry = () => { throw new Error('Private disk path and content'); };
+  const ctx = { model, sessionManager: { getSessionId: () => 'disk-owner', getBranch: () => fx.entries } };
+  const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+  assert.equal(result.isError, true);
+  assert.equal(result.details.failure.code, 'SOURCE_FETCH_FAILED');
+  assert.equal(result.details.retained, false);
+  assert.match(result.content[0].text, /not saved/);
+  assert.equal(JSON.stringify(result).includes('Private'), false);
+  assert.equal(fx.entries.length, 0);
+});
+
+test('provider stop errors are classified without forwarding their private errorMessage', enabled, async t => {
+  const fx = await fixture(t, async options => {
+    try { await options.onModelRequest({ messages: [] }, options.signal); }
+    catch (error) { error.runtime = { cleanup: { confirmed: true }, modelCallbackSettled: true }; throw error; }
+    assert.fail('The provider error must not be returned as a model answer');
+  });
+  const ctx = { model, modelRegistry: { streamSimple: () => ({ result: async () => ({ stopReason: 'error', errorMessage: 'Authorization: secret-native-provider-response' }) }) },
+    sessionManager: { getSessionId: () => 'provider-owner', getBranch: () => fx.entries } };
+  const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+  assert.equal(result.isError, true);
+  assert.equal(result.details.failure.code, 'MODEL_REQUEST_FAILED');
+  assert.equal(result.details.failure.cleanup, 'confirmed');
+  assert.equal(JSON.stringify({ result, entries: fx.entries }).includes('secret-native-provider-response'), false);
+});
+
+test('missing, malformed, oversized or invalid worker catalogs fail before setup without exposing their contents', enabled, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'scout-catalog-failures-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  let setups = 0, launches = 0;
+  const path = join(root, 'private-catalog-path.json');
+  const fx = await fixture(t, async () => { launches++; }, async () => { setups++; }, { PI_SCOUT_CATALOG: path });
+  const ctx = { model, sessionManager: { getSessionId: () => 'catalog-owner', getBranch: () => fx.entries } };
+  for (const contents of [undefined, '{ secret-malformed', 'secret-oversized'.repeat(80000), JSON.stringify({ version: 99, sources: [] }), JSON.stringify({ version: 1, sources: [{ content: 'secret-invalid' }] })]) {
+    if (contents !== undefined) await writeFile(path, contents);
+    const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+    assert.equal(result.isError, true);
+    assert.equal(result.details.failure.code, 'CATALOG_INVALID');
+    assert.match(result.content[0].text, /1 MiB/);
+    assert.equal(JSON.stringify(result).includes('private-catalog-path'), false);
+    assert.equal(JSON.stringify(result).includes('secret-'), false);
+  }
+  assert.equal(setups, 0);
+  assert.equal(launches, 0);
+  assert.equal(fx.entries.length, 5);
 });

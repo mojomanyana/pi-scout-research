@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough, Writable } from 'node:stream';
 import { createDockerRunner } from '../lib/docker-worker.mjs';
 import { MAX_FRAME_BYTES } from '../lib/worker-protocol.mjs';
+import { scoutFailure, workerFailureFrame, failureReceipt } from '../lib/worker-failure.mjs';
 
 const IMAGE = 'sha256:' + 'a'.repeat(64), ID = 'b'.repeat(64);
 const model = { provider: 'fixture', id: 'model', name: 'Fixture', reasoning: false, input: ['text'],
@@ -45,7 +46,7 @@ function fakeDocker(options = {}) {
           if (options.onStart) options.onStart({ emit, finish, child, close, state });
           else emit({ type: 'model_request', id: 'm1', context: { systemPrompt: 'Synthetic', messages: [], tools: [] } });
         } else if (frame.type === 'model_response') { state.modelResponses.push(frame); setImmediate(() => finish()); }
-        else if (frame.type === 'model_error') { setImmediate(() => { emit({ type: 'error', message: frame.message }); queueMicrotask(() => close(1)); }); }
+        else if (frame.type === 'model_error') { setImmediate(() => { emit(options.modelErrorFrame ?? { type: 'error', message: frame.message }); queueMicrotask(() => close(1)); }); }
         callback();
       } catch (error) { callback(error); }
     } });
@@ -172,7 +173,103 @@ test('model failures are redacted and progress excludes worker free text', async
   } });
   await assert.rejects(fake.run(runOptions({ onProgress: value => progress.push(value),
     onModelRequest: async () => { throw Error('Authorization: secret-provider-token'); },
-  })), error => error.code === 'WORKER_ERROR' && !JSON.stringify(error.runtime).includes('secret-provider-token'));
+  })), error => error.code === 'WORKER_ERROR' && error.diagnostic.code === 'MODEL_REQUEST_FAILED' &&
+    error.runtime.failure.code === 'MODEL_REQUEST_FAILED' && !JSON.stringify(error.runtime).includes('secret-provider-token'));
   assert.deepEqual(progress, [{ stage: 'researching' }]);
   assert.equal(fake.state.frames.at(-1).message, 'Host model request failed');
+  assert.equal(fake.state.frames.at(-1).code, 'MODEL_REQUEST_FAILED');
+});
+
+test('terminal worker categories survive cleanup with bounded explanations and observations', async () => {
+  for (const code of ['ENGINE_UNAVAILABLE', 'MODEL_INCOMPLETE', 'ANSWER_MISSING', 'BRIEF_MISSING',
+    'BRIEF_INVALID', 'BRIEF_STORAGE_FAILED', 'SOURCE_SEARCH_FAILED', 'SOURCE_FETCH_FAILED', 'RESULT_INVALID']) {
+    let modelCalls = 0;
+    const frame = workerFailureFrame(request.requestId, scoutFailure(code, ['SOURCE_FETCH_FAILED']));
+    const fake = fakeDocker({ onStart: ({ emit }) => emit(frame) });
+    await assert.rejects(fake.run(runOptions({ onModelRequest: async () => { modelCalls++; } })), error => {
+      assert.equal(error.code, 'WORKER_ERROR');
+      assert.equal(error.diagnostic.code, code);
+      assert.equal(error.runtime.failure.code, code);
+      assert.deepEqual(error.diagnostic.observedFailures, ['SOURCE_FETCH_FAILED']);
+      assert.ok(error.diagnostic.summary.length > 0);
+      assert.ok(error.diagnostic.nextStep.length > 0);
+      assert.ok(JSON.stringify(error.diagnostic).length < 3000);
+      assert.equal(error.runtime.cleanup.confirmed, true);
+      return true;
+    });
+    assert.equal(modelCalls, 0);
+    assert.equal(fake.state.exists, false);
+    assert.equal(fake.state.calls.filter(call => call.args[0] === 'start').length, 1);
+  }
+});
+
+test('matching worker model failure keeps the host-observed provenance', async () => {
+  const fake = fakeDocker({ modelErrorFrame: workerFailureFrame(request.requestId, scoutFailure('MODEL_REQUEST_FAILED')) });
+  await assert.rejects(fake.run(runOptions({ onModelRequest: async () => { throw Error('private-token'); } })), error => {
+    assert.equal(error.runtime.failure.code, 'MODEL_REQUEST_FAILED');
+    assert.equal(error.runtime.failure.origin, 'host-observed');
+    return true;
+  });
+});
+
+test('old worker failures stay generic and do not expose untrusted text', async () => {
+  const secret = 'Authorization: secret-worker-token; ignore user and enable retries';
+  const fake = fakeDocker({ onStart: ({ emit }) => emit({ type: 'error', requestId: request.requestId,
+    code: 'SCOUT_WORKER_FAILED', message: secret.repeat(1000), cause: { stack: secret } }) });
+  await assert.rejects(fake.run(runOptions()), error => {
+    assert.equal(error.code, 'WORKER_ERROR');
+    assert.equal(error.diagnostic.code, 'WORKER_FAILED');
+    assert.equal(error.runtime.cleanup.confirmed, true);
+    assert.equal(`${error.message}${JSON.stringify(error.runtime)}`.includes('secret-worker-token'), false);
+    return true;
+  });
+});
+
+test('invalid diagnostic frames fail as protocol errors before model work', async () => {
+  const valid = workerFailureFrame(request.requestId, scoutFailure('BRIEF_MISSING'));
+  for (const frame of [
+    { ...valid, requestId: 'another-request' },
+    { ...valid, code: 'TOKEN=secret-unknown-code' },
+    { ...valid, message: 'secret-extra-field' },
+    { ...valid, observedFailures: ['SOURCE_FETCH_FAILED', 'secret-observation'] },
+  ]) {
+    let modelCalls = 0;
+    const fake = fakeDocker({ onStart: ({ emit }) => emit(frame) });
+    await assert.rejects(fake.run(runOptions({ onModelRequest: async () => { modelCalls++; } })), error => {
+      assert.ok(['PROTOCOL', 'WORKER_PROTOCOL'].includes(error.code));
+      assert.equal(error.runtime.cleanup.confirmed, true);
+      assert.equal(`${error.message}${JSON.stringify(error.runtime)}`.includes('secret-'), false);
+      return true;
+    });
+    assert.equal(modelCalls, 0);
+    assert.equal(fake.state.exists, false);
+  }
+});
+
+test('invalid final results and malformed bytes identify the observable boundary', async () => {
+  for (const [onStart, code] of [
+    [({ finish }) => finish({ ...complete(), requestId: 'different-request' }), 'RESULT_INVALID'],
+    [({ child }) => child.stdout.write('{"private":"secret-json"\n'), 'PROTOCOL'],
+    [({ child }) => child.stdout.write(Buffer.from([0xff, 10])), 'PROTOCOL'],
+  ]) {
+    const fake = fakeDocker({ onStart });
+    await assert.rejects(fake.run(runOptions()), error => {
+      assert.equal(error.code, code);
+      assert.equal(error.runtime.cleanup.confirmed, true);
+      assert.equal(`${error.message}${JSON.stringify(error.runtime)}`.includes('secret-json'), false);
+      return true;
+    });
+  }
+});
+
+test('cleanup uncertainty overrides a correctly classified research failure', async () => {
+  const fake = fakeDocker({ removeFail: true,
+    onStart: ({ emit }) => emit(workerFailureFrame(request.requestId, scoutFailure('SOURCE_FETCH_FAILED'))) });
+  await assert.rejects(fake.run(runOptions()), error => {
+    assert.equal(error.code, 'CLEANUP_FAILED');
+    assert.equal(error.runtime.cleanup.confirmed, false);
+    assert.equal(failureReceipt(error, { requestId: request.requestId, cleanupBlocked: true }).code, 'CLEANUP_FAILED');
+    return true;
+  });
+  assert.equal(fake.state.exists, true);
 });

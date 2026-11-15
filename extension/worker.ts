@@ -8,6 +8,7 @@ import { referenceNotice, destinationIdentity } from '../lib/brief-reference.mjs
 import { createRequest, validateSources } from '../lib/worker-protocol.mjs';
 import { runScout } from '../lib/docker-worker.mjs';
 import { prepareWorker } from '../lib/worker-setup.mjs';
+import { scoutFailure, failureReceipt, failureText } from '../lib/worker-failure.mjs';
 import { scoutStatus } from './status.ts';
 import { scoutOwner } from './owner.ts';
 
@@ -34,24 +35,30 @@ export default function scoutWorker(pi: ExtensionAPI) {
       const selectedModel = ctx.model;
       const thinking = pi.getThinkingLevel();
       const owner = captureOwner(ctx);
+      let requestId: string | undefined;
+      let phase = 'setup';
       busy = true;
       try {
         observe(ctx, 'running', ['Preparing isolated research worker.']);
         const destination = await destinationIdentity(ctx);
         let sources = [];
         if (process.env.PI_SCOUT_CATALOG) {
-          const data = await readFile(process.env.PI_SCOUT_CATALOG);
-          if (data.length > 1024 * 1024) throw new Error('Worker catalog exceeds 1 MiB');
-          const catalog = JSON.parse(data.toString('utf8'));
-          if (catalog.version !== 1) throw new Error('Unsupported catalog version');
-          sources = validateSources(catalog.sources);
+          try {
+            const data = await readFile(process.env.PI_SCOUT_CATALOG);
+            if (data.length > 1024 * 1024) throw scoutFailure('CATALOG_INVALID');
+            const catalog = JSON.parse(data.toString('utf8'));
+            if (catalog.version !== 1) throw scoutFailure('CATALOG_INVALID');
+            sources = validateSources(catalog.sources);
+          } catch { throw scoutFailure('CATALOG_INVALID'); }
         }
         const request = createRequest({ ...args, mode: configuration.PI_SCOUT_WORKER_MODE ?? 'public', sources, model: selectedModel,
           thinkingLevel: thinking });
+        requestId = request.requestId;
         const { image, mode, dockerPath, dockerArgs } = await prepareWorker({ env: configuration, signal,
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: stage === 'building'
             ? 'Scout: preparing the research worker for first use. This can take a few minutes.' : `Scout: ${stage}` }], details: { stage } }),
         });
+        phase = 'research';
         const completed = await runScout({ request, image, signal,
           dockerPath, dockerArgs,
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: `Scout: ${stage}` }], details: { stage } }),
@@ -63,12 +70,14 @@ export default function scoutWorker(pi: ExtensionAPI) {
             });
             const message = await stream.result();
             if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-              throw new Error('The selected Pi model did not complete the research turn');
+              throw scoutFailure('MODEL_REQUEST_FAILED');
             }
             return message;
           },
         });
-        const saved = await briefs.save(owner.sessionId, completed.result.brief);
+        let saved;
+        try { saved = await briefs.save(owner.sessionId, completed.result.brief); }
+        catch { throw Object.assign(scoutFailure('BRIEF_STORAGE_FAILED'), { runtime: completed.runtime }); }
         const currentDestination = await destinationIdentity(ctx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout completed for the previous session branch. Its brief was retained under the original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
@@ -88,8 +97,13 @@ export default function scoutWorker(pi: ExtensionAPI) {
         if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false)) {
           cleanupBlocked = true;
         }
-        observe(ctx, cleanupBlocked ? 'unknown' : 'failed', [cleanupBlocked ? 'Settlement is uncertain; another worker is blocked.' : 'Research did not complete. Inspect the Pi tool result.']);
-        throw error;
+        if (!owner.current()) return { isError: true, content: [{ type: 'text', text: 'Scout failed for the previous session branch. Its diagnostic is withheld from the new branch.' }], details: { outputWithheld: true, reason: 'owner-changed' } };
+        const failure = failureReceipt(error, { requestId, phase, cleanupBlocked });
+        let retained = false;
+        try { pi.appendEntry('scout-worker-failure-v1', failure); retained = true; }
+        catch { /* A session-write error must not hide the original failure. */ }
+        observe(ctx, cleanupBlocked ? 'unknown' : 'failed', [failure.summary, failure.nextStep]);
+        return { isError: true, content: [{ type: 'text', text: `${failureText(failure)}\nFailure record: ${retained ? 'saved in this Pi session' : 'not saved; retain this tool result'}.` }], details: { failure, retained } };
       } finally { busy = false; }
     },
   });
