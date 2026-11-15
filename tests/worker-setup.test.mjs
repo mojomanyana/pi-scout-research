@@ -257,7 +257,14 @@ await prepareWorker({ packageRoot: process.argv[2], cacheRoot: process.argv[3] }
   for (let n = 0; n < 300; n++) {
     client = (await fx.calls()).find(call => call.args.includes('build'));
     const locks = await readdir(fx.cacheRoot).catch(() => []);
-    if (locks[0]) owner = JSON.parse(await readFile(join(fx.cacheRoot, locks[0], 'owner.json'), 'utf8'));
+    owner = undefined;
+    if (locks[0]) {
+      // The initial exclusive write may still be creating this record. Wait for
+      // the running-owner handshake before simulating a crash; other I/O errors
+      // still fail the test, and the bounded loop below remains unchanged.
+      try { owner = JSON.parse(await readFile(join(fx.cacheRoot, locks[0], 'owner.json'), 'utf8')); }
+      catch (error) { if (!(error instanceof SyntaxError) && error.code !== 'ENOENT') throw error; }
+    }
     if (client && owner?.state === 'running') break;
     await delay(10);
   }
