@@ -36,7 +36,7 @@ export default function research(pi: ExtensionAPI) {
 
   pi.registerTool({
     name: 'research_sources', label: 'Research sources',
-    description: 'List operator-approved sources, marking web entries not fetched yet. Listing never makes network requests.',
+    description: 'List sources configured in this parent Pi session, marking web entries not fetched yet. Listing never makes network requests. This local catalog is separate from scout_research worker sources: an empty list is valid and does not diagnose a worker failure or prevent public worker research.',
     parameters: Type.Object({}, { additionalProperties: false }),
     async execute(_id, _args, _signal, _update, ctx) {
       const current = await catalog(ctx);

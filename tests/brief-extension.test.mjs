@@ -24,12 +24,19 @@ test('native local save/read and trusted peer resolver enforce branch, destinati
   const [local, reader] = loaded.extensions;
   const versions = [];
   bus.emit('pi-daddy:ecosystem-versions:v1',{report:value=>versions.push(value)});
-  assert.deepEqual(versions.map(({id,version})=>({id,version})),[{id:'pi-scout-research',version:'0.2.2'}]);
+  assert.deepEqual(versions.map(({id,version})=>({id,version})),[{id:'pi-scout-research',version:'0.2.3'}]);
   let endpoint = 'https://provider.example/v1', branch = entries;
   const ctx = { cwd:root, model:{provider:'fixture',id:'model',api:'fixture',baseUrl:endpoint},
     modelRegistry:{getApiKeyAndHeaders:async()=>({ok:true,baseUrl:endpoint,apiKey:'never-retained'})},
     sessionManager:{getSessionId:()=> 'source-session',getBranch:()=>branch} };
   const invoke = (extension,name,args) => extension.tools.get(name).definition.execute('call',args,new AbortController().signal,undefined,ctx);
+  const localSources = local.tools.get('research_sources').definition;
+  assert.match(localSources.description, /separate from scout_research worker sources/);
+  assert.match(localSources.description, /empty list is valid/);
+  const emptyCatalog = await invoke(local, 'research_sources', {});
+  assert.deepEqual(emptyCatalog.details, []);
+  assert.deepEqual(JSON.parse(emptyCatalog.content[0].text), []);
+  assert.equal(emptyCatalog.isError, undefined);
   const saved = (await invoke(local,'research_brief',{question:'Fixture only',scope:'Selected sources',questions:[],doneWhen:'Return gaps',findings:[],gaps:['Unknown']})).details;
   assert.equal(saved.saved,true);
   assert.equal(entries[0].customType,'scout-brief-v2');

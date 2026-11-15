@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.3 — 2026-11-15
+
+- Report actionable, static failure categories and next steps for worker setup,
+  model requests, source tools, evidence briefs and result validation. Retain a
+  bounded failure record in the owning Pi session without raw exception text.
+- Preserve cancellation, cleanup and unsettled-work restrictions. Keep recoverable
+  tool failures separate from the terminal cause, and withhold failed-job details
+  after a session or branch change.
+- Clarify that an empty parent source catalog does not diagnose public worker
+  availability. Add offline regression coverage without research or model calls.
+
 ## 0.2.2 — 2026-11-07
 
 - Include the brief-reference helper in the Docker worker build context and image identity, fixing startup of workers that retain compact brief references. Add an import-closure and image-invalidation regression.

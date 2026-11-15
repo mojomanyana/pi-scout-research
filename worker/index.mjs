@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { validateStart, validateResult, parseFrame, encodeFrame, MAX_FRAME_BYTES } from '../lib/worker-protocol.mjs';
 import { ModelBridge, boundedLines } from './bridge.mjs';
+import { scoutFailure, failureCode, workerFailureFrame } from '../lib/worker-failure.mjs';
 
-let request, bridge;
+let request, bridge, phase = 'WORKER_PROTOCOL';
 const controller = new AbortController();
 const send = value => process.stdout.write(encodeFrame(value));
 const stop = () => { controller.abort(Error('Worker interrupted')); bridge?.close(Error('Worker interrupted')); };
@@ -22,18 +23,23 @@ try {
   send({ type: 'progress', stage: 'starting' });
   bridge = new ModelBridge(send);
   const pump = (async () => {
-    while (true) { const next = await frames.next(); if (next.done) throw Error('Host input closed before completion'); bridge.accept(parseFrame(next.value)); }
+    try {
+      while (true) { const next = await frames.next(); if (next.done) throw scoutFailure('WORKER_PROTOCOL'); bridge.accept(parseFrame(next.value)); }
+    } catch (error) { throw scoutFailure(failureCode(error, 'WORKER_PROTOCOL')); }
   })();
   // A protocol failure interrupts pending model requests immediately.
   void pump.catch(error => { bridge.close(error); controller.abort(error); });
+  phase = 'WORKER_INITIALIZATION';
   const { runResearch } = await import('./session.mjs');
   send({ type: 'progress', stage: 'researching' });
+  phase = 'WORKER_FAILED';
   const result = await Promise.race([runResearch(request, bridge, { signal: controller.signal }), pump]);
   send({ type: 'progress', stage: 'saving' });
+  phase = 'RESULT_INVALID';
   send(validateResult(result, request));
 } catch (error) {
   bridge?.close(error); controller.abort(error);
-  send({ type: 'error', requestId: request?.requestId ?? null, code: 'SCOUT_WORKER_FAILED', message: String(error?.message ?? error).slice(0, 2000) });
+  send(workerFailureFrame(request?.requestId ?? null, scoutFailure(failureCode(error, phase), error?.observedFailures)));
   process.exitCode = 1;
 } finally {
   // Leave the unref deadline armed: stdin failure can win the race while an

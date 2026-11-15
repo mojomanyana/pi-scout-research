@@ -1,8 +1,10 @@
 // A transport adapter only: credentials and real provider calls stay in the host Pi.
+import { scoutFailure, failureCode, diagnostic } from '../lib/worker-failure.mjs';
 export class ModelBridge {
   #pending = new Map();
   #next = 0;
   #closed;
+  failureCode;
   constructor(send) { this.send = send; }
   request(context, signal) {
     if (this.#closed) return Promise.reject(this.#closed);
@@ -17,15 +19,18 @@ export class ModelBridge {
     });
   }
   accept(frame) {
-    if (!frame || !['model_response', 'model_error'].includes(frame.type) || typeof frame.id !== 'string') throw Error('Unexpected worker input frame');
+    if (!frame || !['model_response', 'model_error'].includes(frame.type) || typeof frame.id !== 'string') throw scoutFailure('WORKER_PROTOCOL');
     const pending = this.#pending.get(frame.id);
-    if (!pending) throw Error('Model response does not match an outstanding request');
+    if (!pending) throw scoutFailure('WORKER_PROTOCOL');
     this.#pending.delete(frame.id);
-    if (frame.type === 'model_error') { pending.reject(Error(typeof frame.message === 'string' ? frame.message.slice(0, 2000) : 'Host model failed')); return; }
+    if (frame.type === 'model_error') { this.failureCode = 'MODEL_REQUEST_FAILED'; pending.reject(scoutFailure(this.failureCode)); return; }
     const message = frame.message;
     if (!message || message.role !== 'assistant' || !Array.isArray(message.content) || !['stop', 'toolUse', 'length', 'error', 'aborted'].includes(message.stopReason)) {
-      const error = Error('Host returned an invalid assistant message'); pending.reject(error); throw error;
+      this.failureCode = 'MODEL_RESPONSE_INVALID';
+      const error = scoutFailure(this.failureCode); pending.reject(error); throw error;
     }
+    this.failureCode = ['error', 'aborted'].includes(message.stopReason) ? 'MODEL_REQUEST_FAILED' : undefined;
+    if (this.failureCode) { pending.reject(scoutFailure(this.failureCode)); return; }
     pending.resolve(message);
   }
   close(error = Error('Host input closed')) {
@@ -55,11 +60,11 @@ export async function* boundedLines(input, maxBytes) {
 export function bridgeStream(createStream, bridge, model, context, options) {
   const stream = createStream();
   void bridge.request(context, options?.signal).then(message => {
-    if (['error', 'aborted'].includes(message.stopReason)) stream.push({ type: 'error', reason: message.stopReason, error: message });
+    if (['error', 'aborted'].includes(message.stopReason)) stream.push({ type: 'error', reason: message.stopReason, error: { ...message, errorMessage: diagnostic('MODEL_REQUEST_FAILED').summary } });
     else { stream.push({ type: 'start', partial: structuredClone(message) }); stream.push({ type: 'done', reason: message.stopReason, message }); }
     stream.end();
   }, error => {
-    stream.push({ type: 'error', reason: 'error', error: { role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), stopReason: 'error', errorMessage: String(error), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } });
+    stream.push({ type: 'error', reason: 'error', error: { role: 'assistant', content: [], api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), stopReason: 'error', errorMessage: diagnostic(failureCode(error)).summary, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } });
     stream.end();
   });
   return stream;

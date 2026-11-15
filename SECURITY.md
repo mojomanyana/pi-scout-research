@@ -24,6 +24,17 @@ Private brief files use content-addressed exclusive creation. Pi tool results re
 
 The worker's Docker log driver is disabled. The private model exchange travels through the attached pipe without a second persistent Docker stdout log. The parent stores the returned answer, sources and brief; it does not save raw worker model contexts as diagnostic output.
 
+Failure diagnostics use a fixed vocabulary selected at known code boundaries.
+Versioned worker error frames are bound to the request and allowlist; unknown codes,
+extra fields and mismatched requests are protocol failures. Legacy worker error text
+is discarded. The parent retains a bounded `scout-worker-failure-v1` session entry
+with the category, static next step and cleanup/settlement facts. No raw exception,
+provider body, stack, command arguments, source query or credential is included.
+Recoverable source-tool failures are kept as a bounded list of codes, not asserted
+as the terminal cause. Diagnostic records confer no result approval or disclosure
+permission, and are not restored as research evidence. Owner changes prevent writing
+the failure record or dashboard detail into the new branch.
+
 ## Other modes
 
 `offline` disables worker networking. It reads supplied snapshots through its tools, but the parent still sends selected material to its provider. It is not air-gapped model execution.

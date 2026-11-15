@@ -9,7 +9,7 @@ The skill does not depend on Principal, pi-daddy or skill-harness. Those package
 With Pi and Docker running on the same computer, install Scout:
 
 ```bash
-pi install npm:pi-scout-research@0.2.2
+pi install npm:pi-scout-research@0.2.3
 ```
 
 Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
@@ -27,7 +27,7 @@ export PI_SCOUT_DOCKER_PATH='/mnt/c/Program Files/Docker/Docker/resources/bin/do
 export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 ```
 
-`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.2 scout-worker-build`, but first-use preparation performs the same work automatically.
+`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.3 scout-worker-build`, but first-use preparation performs the same work automatically.
 
 Governed children need Scout in their selected resources and permission for `scout_research`; no Docker command or image parameter is supplied by the model. A child Pi with the tool loaded owns its worker lifecycle.
 
@@ -60,11 +60,33 @@ The parent checks the effective Docker configuration, validates source identitie
 
 **Public mode does not guarantee that every outbound URL, redirect or query is approved.** It does not enforce confidentiality of supplied text. OpenShell is not required. Strict protected online mode remains separate and unqualified. See [SECURITY.md](SECURITY.md).
 
+## When research fails
+
+Scout returns a failed tool result with a short explanation, a next step, and the
+cleanup state. It saves the same bounded diagnostic in the current Pi session as
+`scout-worker-failure-v1`; this is a failure record, not a completed brief. It
+distinguishes setup, model, source, evidence, result and cleanup failures where the
+origin is known. Older explicitly selected worker images may only provide an
+unclassified failure. Automatic setup rebuilds when the packaged worker changes.
+
+Earlier search/fetch failures may be listed separately when a later step fails.
+They can be recovered during research and do not prove the final failure's cause.
+Unknown causes remain unknown. There are no automatic retries or host-tool fallbacks.
+Unconfirmed cleanup or model settlement continues to block another worker.
+
+The parent `research_sources` list describes its local configured sources. It is
+separate from sources discovered inside `scout_research`. An empty local list is
+valid and does not establish why a public worker failed.
+
+Diagnostics contain static categories and lifecycle facts only. They do not retain
+raw exception text, provider responses, credentials, query text or command arguments.
+If the session changes before failure, diagnostics are withheld from the new branch.
+
 ## Portable skill and local sources
 
 `/skill:research` works without Docker using available Pi research tools. Installing the package alone does not isolate host tools. The `scout_research` tool always uses its Docker worker and prepares it automatically; Docker errors do not silently enable host web access.
 
-The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.2.2 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
+The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.2.3 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
 
 ```json
 [{"id":"release","title":"Release notes","path":"./release-notes.txt","locator":"local:release-notes.txt"}]
