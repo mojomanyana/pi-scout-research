@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.5 — 2026-11-16
+
+- Explain when a known Docker connection failure stopped setup before a research
+  worker started, so missing cleanup evidence for that attempt is not mistaken for
+  an unresolved worker. Keep the compatible cleanup status and expose the narrow
+  `workerStarted: false` observation; ordinary authorized retry remains available
+  after the selected Docker connection is reachable.
+- Keep unsettled setup, worker and model restrictions unchanged. Preserve useful
+  partial research and identify which missing facts block which requirements,
+  while respecting explicit user stop conditions and evidence gates.
+
 ## 0.2.4 — 2026-11-15
 
 - Give the research worker safe, field-specific brief corrections, including

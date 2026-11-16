@@ -9,7 +9,7 @@ The skill does not depend on Principal, pi-daddy or skill-harness. Those package
 With Pi and Docker running on the same computer, install Scout:
 
 ```bash
-pi install npm:pi-scout-research@0.2.4
+pi install npm:pi-scout-research@0.2.5
 ```
 
 Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
@@ -29,7 +29,7 @@ export PI_SCOUT_DOCKER_PATH='/mnt/c/Program Files/Docker/Docker/resources/bin/do
 export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 ```
 
-`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.4 scout-worker-build`, but first-use preparation performs the same work automatically.
+`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.5 scout-worker-build`, but first-use preparation performs the same work automatically.
 
 Governed children need Scout in their selected resources and permission for `scout_research`; no Docker command or image parameter is supplied by the model. A child Pi with the tool loaded owns its worker lifecycle.
 
@@ -48,7 +48,10 @@ When research is incomplete, carry its exact brief reference, incomplete status
 and unresolved reason into the product handoff. Reuse supported findings that still apply, and address
 the missing evidence instead of repeating the whole investigation. A dependent
 requirement stays open until its required evidence is available; a saved brief
-alone does not satisfy it.
+alone does not satisfy it. Identify which missing facts block which requirements
+and which independent work is already authorized. Preserve explicit user stop
+conditions and evidence gates; explain a proposed narrower next step rather than
+silently overriding a gate.
 
 Harness's optional `jev_advice` may help the parent assess whether that proposed
 lookup is useful when workflow advice is already enabled. It does not select tools
@@ -99,6 +102,14 @@ cleanup state. It saves the same bounded diagnostic in the current Pi session as
 distinguishes setup, model, source, evidence, result and cleanup failures where the
 origin is known. Older explicitly selected worker images may only provide an
 unclassified failure. Automatic setup rebuilds when the packaged worker changes.
+
+A known Docker connection failure during setup, before the research worker starts
+and with no cleanup block, explicitly reports that no worker cleanup is needed for
+that attempt. Its receipt keeps `cleanup: 'unknown'` for compatibility and adds
+`workerStarted: false`; it does not confirm cleanup of earlier work. Once the selected
+Docker connection is reachable, a deliberate retry through the normal tool may
+proceed within the authorized scope. This does not apply to other setup failures
+or unsettled setup, worker or model requests.
 
 Earlier search/fetch failures may be listed separately when a later step fails.
 They can be recovered during research and do not prove the final failure's cause.
