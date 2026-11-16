@@ -22,7 +22,8 @@
     "worker/runtime",
     "Dockerfile",
     ".dockerignore",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/worker-transport.md"
   ],
   "pi": {
     "skills": [

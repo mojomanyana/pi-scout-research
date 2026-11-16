@@ -6,6 +6,14 @@ The operator selected this mode on 2026-10-30: isolated files/processes and reso
 
 Docker contains the worker filesystem and resource use. There are no host mounts, real credentials, Docker socket, browser profile or inherited parent session. Scout receives the explicit question/scope and optional operator-selected catalog. Credentials are resolved by the parent Pi model registry. Bounded native model contexts and replies travel through standard input/output; the worker cannot select a host provider, credential, request URL or API options.
 
+Negotiated context deltas can append only to the host's exact acknowledged request
+snapshot. Full frames and reconstructed contexts remain bounded to 4 MiB; the
+16 MiB lifetime stdout/stderr budget remains enforced. Host provider code receives
+a separate context object, so mutations cannot change the retained prefix. Public
+failure receipts include allowlisted counters and boundary labels only. Missing
+or unsettled model usage remains explicitly unknown; response contents, credentials
+and private provider diagnostics are not included in these receipts.
+
 Public search and fetch send data outside the container. The model provider receives the worker conversation, including fetched material. Queries may disclose anything the parent supplies. Prompt guidance and reference-engine SSRF checks are not a whole-process egress boundary. Docker bridge networking must not be described as denying all private/LAN destinations, redirects, query-based exfiltration or malicious web behavior. Supply public, nonsecret material only.
 
 No shell, filesystem edit/read, delegation or MCP tools are exposed to the worker model. Deferred web-engine tools are reached through research wrappers. The engine performs raw unauthenticated HTTPS fetches and keyless Exa search; no browser/cookie access, JavaScript rendering, remote page extraction or secondary model summary is configured. The external search service can change or become unavailable. A returned requested URL does not prove the final redirect destination.
