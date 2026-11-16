@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1 — 2026-11-16
+
+- Negotiate append-only model context transfers so later research turns do not
+  repeatedly spend the worker's output budget on the same conversation prefix.
+  Preserve full-context compatibility, the 4 MiB frame/context limit, 16 MiB
+  cumulative output limit, timeouts and owned cleanup.
+- Retain host-observed model usage for successful, incomplete and failed runs,
+  explicitly identifying unmeasured or still-pending calls. Keep worker session
+  counters separate to prevent double counting; no billed-cost claim is made.
+- Distinguish individual frame/context limits from cumulative output exhaustion
+  and retain bounded numeric traffic diagnostics without prompts, source text,
+  private provider errors or Docker arguments.
+
 ## 0.3.0 — 2026-11-16
 
 - Show bounded saved research topics, sourced or unverified findings, gaps and

@@ -114,6 +114,15 @@ or unsettled setup, worker or model requests.
 Earlier search/fetch failures may be listed separately when a later step fails.
 They can be recovered during research and do not prove the final failure's cause.
 Unknown causes remain unknown. There are no automatic worker retries or host-tool fallbacks.
+Compatible workers send only newly appended conversation messages after the host
+acknowledges their context, avoiding repeated-prefix traffic while keeping the
+existing output and frame bounds. `FRAME_LIMIT` identifies a single frame/context
+limit; `OUTPUT_LIMIT` identifies cumulative worker output. Safe diagnostics include
+numeric traffic counters, not captured prompts or provider error bodies.
+Successful and failed tool results retain host-observed model usage, including
+explicit unmeasured or pending calls. These counters are separate from the worker's
+session totals and must not be added together. They do not measure billed cost or
+prefill/decode speed. See [worker transport and usage](docs/worker-transport.md).
 Unconfirmed cleanup or model settlement continues to block another worker.
 
 The parent `research_sources` list describes its local configured sources. It is

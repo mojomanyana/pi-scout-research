@@ -9,6 +9,7 @@ import { createRequest, validateSources } from '../lib/worker-protocol.mjs';
 import { runScout } from '../lib/docker-worker.mjs';
 import { prepareWorker } from '../lib/worker-setup.mjs';
 import { scoutFailure, failureReceipt, failureText } from '../lib/worker-failure.mjs';
+import { usageText } from '../lib/worker-usage.mjs';
 import { scoutStatus } from './status.ts';
 import { scoutOwner } from './owner.ts';
 import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
@@ -73,8 +74,10 @@ export default function scoutWorker(pi: ExtensionAPI) {
               signal: modelSignal, ...(thinking === 'off' ? {} : { reasoning: thinking }),
             });
             const message = await stream.result();
+            // The host runner records any reported usage before classifying an
+            // error/aborted response, so failed research does not erase its usage.
             if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-              throw scoutFailure('MODEL_REQUEST_FAILED');
+              throw Object.assign(scoutFailure('MODEL_REQUEST_FAILED'), { reportedUsage: message.usage });
             }
             return message;
           },
@@ -121,7 +124,8 @@ export default function scoutWorker(pi: ExtensionAPI) {
           researchStatus: completed.result.status ?? 'unknown', briefPath: saved.path, briefSha256: saved.sha256,
           briefReference: saved.reference,
           semanticApproval: false, protectedOnline: false };
-        return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.` }], details };
+        const modelUsage = usageText(completed.runtime.usage);
+        return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.${modelUsage ? `\n${modelUsage}` : ''}` }], details };
       } catch (error) {
         if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false)) {
           cleanupBlocked = true;

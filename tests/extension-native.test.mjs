@@ -380,18 +380,43 @@ test('failure receipt persistence failure does not hide the original category or
 });
 
 test('provider stop errors are classified without forwarding their private errorMessage', enabled, async t => {
+  const usage = { input: 10, output: 2, cacheRead: 100, cacheWrite: 0, totalTokens: 112 };
   const fx = await fixture(t, async options => {
     try { await options.onModelRequest({ messages: [] }, options.signal); }
-    catch (error) { error.runtime = { cleanup: { confirmed: true }, modelCallbackSettled: true }; throw error; }
+    catch (error) {
+      assert.deepEqual(error.reportedUsage, usage);
+      assert.doesNotMatch(error.message, /secret-native-provider-response/);
+      error.runtime = { cleanup: { confirmed: true }, modelCallbackSettled: true }; throw error;
+    }
     assert.fail('The provider error must not be returned as a model answer');
   });
-  const ctx = { model, modelRegistry: { streamSimple: () => ({ result: async () => ({ stopReason: 'error', errorMessage: 'Authorization: secret-native-provider-response' }) }) },
+  const ctx = { model, modelRegistry: { streamSimple: () => ({ result: async () => ({ stopReason: 'error', errorMessage: 'Authorization: secret-native-provider-response', usage }) }) },
     sessionManager: { getSessionId: () => 'provider-owner', getBranch: () => fx.entries } };
   const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
   assert.equal(result.isError, true);
   assert.equal(result.details.failure.code, 'MODEL_REQUEST_FAILED');
   assert.equal(result.details.failure.cleanup, 'confirmed');
   assert.equal(JSON.stringify({ result, entries: fx.entries }).includes('secret-native-provider-response'), false);
+});
+
+test('a brief storage failure retains completed host usage without claiming the brief was saved', enabled, async t => {
+  const usage = { source: 'host-provider-responses', calls: { started: 2, settled: 2, measured: 1, unmeasured: 1, pending: 0 },
+    tokens: { input: 10, output: 2, cacheRead: 100, cacheWrite: 0, totalTokens: 112 }, coverage: 'partial' };
+  const fx = await fixture(t, async options => ({ result: { type: 'result', version: 1,
+    requestId: options.request.requestId, status: 'incomplete', answer: 'Partial public research', sources: [],
+    brief: { version: 1, question: options.request.question, scope: options.request.scope,
+      questions: [], doneWhen: 'Identify evidence', findings: [], gaps: ['Missing source'] } },
+  runtime: { cleanup: { confirmed: true }, modelCallbackSettled: true, usage } }));
+  await writeFile(join(fx.root, 'briefs'), 'Existing file prevents directory creation');
+  const ctx = { model, sessionManager: { getSessionId: () => 'storage-failure-owner', getBranch: () => fx.entries } };
+  const result = await fx.tool.execute('failed', { question: 'Public', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+  assert.equal(result.isError, true);
+  assert.equal(result.details.failure.code, 'BRIEF_STORAGE_FAILED');
+  assert.deepEqual(result.details.failure.usage, usage);
+  assert.match(result.content[0].text, /1 calls have no recorded usage/);
+  assert.doesNotMatch(result.content[0].text, /Scout brief saved/);
+  assert.equal(fx.entries.some(entry => entry.customType === 'scout-worker-brief-v2'), false);
+  assert.equal(fx.entries.some(entry => entry.customType === 'scout-worker-failure-v1'), true);
 });
 
 test('missing, malformed, oversized or invalid worker catalogs fail before setup without exposing their contents', enabled, async t => {

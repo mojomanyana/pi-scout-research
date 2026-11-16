@@ -4,17 +4,31 @@ export class ModelBridge {
   #pending = new Map();
   #next = 0;
   #closed;
+  #acknowledged;
   failureCode;
   constructor(send) { this.send = send; }
   request(context, signal) {
     if (this.#closed) return Promise.reject(this.#closed);
     if (signal?.aborted) return Promise.reject(signal.reason ?? Error('Model request cancelled'));
     const id = `model-${++this.#next}`;
+    // Acknowledgements negotiate this optimization with the host. Old hosts and
+    // images keep the original full-context protocol. Retain a snapshot because
+    // Pi may append to or rewrite the original context between model turns.
+    const snapshot = structuredClone(context);
+    const previous = this.#acknowledged;
+    const appendOnly = previous && Array.isArray(snapshot.messages) &&
+      snapshot.messages.length >= previous.context.messages.length &&
+      JSON.stringify(snapshot.systemPrompt) === JSON.stringify(previous.context.systemPrompt) &&
+      JSON.stringify(snapshot.tools) === JSON.stringify(previous.context.tools) &&
+      Object.keys(snapshot).every(key => ['systemPrompt', 'messages', 'tools'].includes(key)) &&
+      previous.context.messages.every((message, index) => JSON.stringify(message) === JSON.stringify(snapshot.messages[index]));
+    const frame = appendOnly ? { type: 'model_request_delta', id, baseId: previous.id,
+      messages: snapshot.messages.slice(previous.context.messages.length) } : { type: 'model_request', id, context: snapshot };
     return new Promise((resolve, reject) => {
       const cancel = () => { this.#pending.delete(id); reject(signal.reason ?? Error('Model request cancelled')); };
-      this.#pending.set(id, { resolve: value => { signal?.removeEventListener('abort', cancel); resolve(value); }, reject: error => { signal?.removeEventListener('abort', cancel); reject(error); } });
+      this.#pending.set(id, { context: snapshot, resolve: value => { signal?.removeEventListener('abort', cancel); resolve(value); }, reject: error => { signal?.removeEventListener('abort', cancel); reject(error); } });
       signal?.addEventListener('abort', cancel, { once: true });
-      try { this.send({ type: 'model_request', id, context }); }
+      try { this.send(frame); }
       catch (error) { this.#pending.delete(id); signal?.removeEventListener('abort', cancel); reject(error); }
     });
   }
@@ -23,6 +37,10 @@ export class ModelBridge {
     const pending = this.#pending.get(frame.id);
     if (!pending) throw scoutFailure('WORKER_PROTOCOL');
     this.#pending.delete(frame.id);
+    if (frame.contextAck !== undefined && frame.contextAck !== frame.id) {
+      const error = scoutFailure('WORKER_PROTOCOL'); pending.reject(error); throw error;
+    }
+    this.#acknowledged = frame.contextAck === frame.id ? { id: frame.id, context: pending.context } : undefined;
     if (frame.type === 'model_error') { this.failureCode = 'MODEL_REQUEST_FAILED'; pending.reject(scoutFailure(this.failureCode)); return; }
     const message = frame.message;
     if (!message || message.role !== 'assistant' || !Array.isArray(message.content) || !['stop', 'toolUse', 'length', 'error', 'aborted'].includes(message.stopReason)) {
@@ -46,12 +64,12 @@ export async function* boundedLines(input, maxBytes) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     let start = 0;
     for (let end = bytes.indexOf(10); end !== -1; end = bytes.indexOf(10, start)) {
-      if (pending.length + end - start > maxBytes) throw Error('Worker input frame exceeds size limit');
+      if (pending.length + end - start > maxBytes) throw scoutFailure('FRAME_LIMIT');
       const line = Buffer.concat([pending, bytes.subarray(start, end)]);
       pending = Buffer.alloc(0); start = end + 1;
       if (line.length) yield new TextDecoder('utf-8', { fatal: true }).decode(line);
     }
-    if (pending.length + bytes.length - start > maxBytes) throw Error('Worker input frame exceeds size limit');
+    if (pending.length + bytes.length - start > maxBytes) throw scoutFailure('FRAME_LIMIT');
     pending = Buffer.concat([pending, bytes.subarray(start)]);
   }
   if (pending.length) throw Error('Worker input ended with an incomplete frame');

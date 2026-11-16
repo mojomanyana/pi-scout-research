@@ -1,6 +1,6 @@
 {
   "name": "pi-scout-research",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Portable evidence-led research with private, branch-aware briefs for Pi",
   "type": "module",
   "license": "MIT",
@@ -22,7 +22,8 @@
     "worker/runtime",
     "Dockerfile",
     ".dockerignore",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "docs/worker-transport.md"
   ],
   "pi": {
     "skills": [

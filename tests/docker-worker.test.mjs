@@ -5,6 +5,7 @@ import { PassThrough, Writable } from 'node:stream';
 import { createDockerRunner } from '../lib/docker-worker.mjs';
 import { MAX_FRAME_BYTES } from '../lib/worker-protocol.mjs';
 import { scoutFailure, workerFailureFrame, failureReceipt } from '../lib/worker-failure.mjs';
+import { ModelBridge } from '../worker/bridge.mjs';
 
 const IMAGE = 'sha256:' + 'a'.repeat(64), ID = 'b'.repeat(64);
 const model = { provider: 'fixture', id: 'model', name: 'Fixture', reasoning: false, input: ['text'],
@@ -45,7 +46,11 @@ function fakeDocker(options = {}) {
         if (frame.type === 'start') {
           if (options.onStart) options.onStart({ emit, finish, child, close, state });
           else emit({ type: 'model_request', id: 'm1', context: { systemPrompt: 'Synthetic', messages: [], tools: [] } });
-        } else if (frame.type === 'model_response') { state.modelResponses.push(frame); setImmediate(() => finish()); }
+        } else if (frame.type === 'model_response') {
+          state.modelResponses.push(frame);
+          if (options.onModelResponse) options.onModelResponse({ frame, emit, finish, child, close, state });
+          else setImmediate(() => finish());
+        }
         else if (frame.type === 'model_error') { setImmediate(() => { emit(options.modelErrorFrame ?? { type: 'error', message: frame.message }); queueMicrotask(() => close(1)); }); }
         callback();
       } catch (error) { callback(error); }
@@ -273,4 +278,156 @@ test('cleanup uncertainty overrides a correctly classified research failure', as
     return true;
   });
   assert.equal(fake.state.exists, true);
+});
+
+test('long append-only research reaches a retained brief without resending growing conversation prefixes', async () => {
+  const messages = [], contexts = [], calls = 24;
+  let bridge, completion, fullContextBytes = 0;
+  const reported = { input: 10, output: 2, cacheRead: 100, cacheWrite: 0, totalTokens: 112 };
+  const fake = fakeDocker({
+    onStart: ({ emit, finish }) => {
+      bridge = new ModelBridge(emit);
+      completion = (async () => {
+        for (let index = 0; index < calls; index++) {
+          messages.push({ role: 'user', content: `${index}:` + 'public-source-'.repeat(6500) });
+          const context = { systemPrompt: 'One bounded public research request', tools: [], messages };
+          contexts.push(structuredClone(context));
+          fullContextBytes += Buffer.byteLength(JSON.stringify({ type: 'model_request', id: `model-${index + 1}`, context })) + 1;
+          await bridge.request(context);
+        }
+        finish({ ...complete(), usage: { ...reported, modelCalls: calls } });
+      })();
+    },
+    onModelResponse: ({ frame }) => { setImmediate(() => bridge.accept(frame)); },
+  });
+  let observed = 0;
+  const answer = await fake.run(runOptions({ limits: { commandMs: 300, wallMs: 10000, drainMs: 50 },
+    onModelRequest: async context => {
+      assert.deepEqual(context, contexts[observed++]);
+      // Provider-side input mutation must not change the host's next base snapshot.
+      context.messages.push({ role: 'user', content: 'Provider-local mutation' });
+      return { role: 'assistant', content: [], stopReason: 'toolUse', usage: reported };
+    },
+  }));
+  await completion;
+  assert.equal(observed, calls);
+  assert.ok(fullContextBytes > 16 * 1024 * 1024);
+  assert.ok(answer.runtime.transport.stdoutBytes < 3 * 1024 * 1024);
+  assert.equal(answer.runtime.transport.outputLimitBytes, 16 * 1024 * 1024);
+  assert.equal(answer.runtime.transport.frameLimitBytes, MAX_FRAME_BYTES);
+  assert.equal(answer.runtime.transport.modelRequests, calls);
+  assert.equal(answer.runtime.transport.deltaRequests, calls - 1);
+  assert.equal(answer.runtime.usage.calls.measured, calls);
+  assert.equal(answer.runtime.usage.tokens.totalTokens, calls * reported.totalTokens);
+  assert.equal(answer.result.usage.totalTokens, reported.totalTokens, 'worker statistics remain separate, never added to host totals');
+  assert.equal(answer.runtime.cleanup.confirmed, true);
+  assert.equal(fake.state.exists, false);
+});
+
+test('invalid continuation base, repeated IDs and injected fields do not trigger another model call', async () => {
+  for (const delta of [
+    { type: 'model_request_delta', id: 'm2', baseId: 'stale', messages: [] },
+    { type: 'model_request_delta', id: 'm1', baseId: 'm1', messages: [] },
+    { type: 'model_request_delta', id: 'm2', baseId: 'm1', messages: [], apiKey: 'secret-fixture-token' },
+  ]) {
+    let calls = 0;
+    const fake = fakeDocker({ onModelResponse: ({ emit }) => setImmediate(() => emit(delta)) });
+    await assert.rejects(fake.run(runOptions({ onModelRequest: async () => { calls++; return { role: 'assistant', content: [] }; } })), error => {
+      assert.equal(error.code, 'PROTOCOL');
+      assert.equal(error.runtime.cleanup.confirmed, true);
+      assert.doesNotMatch(JSON.stringify(failureReceipt(error)), /secret-fixture-token/);
+      return true;
+    });
+    assert.equal(calls, 1);
+  }
+  const firstDelta = fakeDocker({ onStart: ({ emit }) => emit({ type: 'model_request_delta', id: 'm1', baseId: 'missing', messages: [] }) });
+  await assert.rejects(firstDelta.run(runOptions()), error => error.code === 'PROTOCOL' && error.runtime.transport.modelRequests === 0);
+});
+
+test('small deltas cannot grow reconstructed model context beyond the existing frame limit', async () => {
+  let calls = 0;
+  const fake = fakeDocker({
+    onStart: ({ emit }) => emit({ type: 'model_request', id: 'm1', context: { messages: [{ role: 'user', content: 'a'.repeat(3 * 1024 * 1024) }] } }),
+    onModelResponse: ({ emit }) => setImmediate(() => emit({ type: 'model_request_delta', id: 'm2', baseId: 'm1',
+      messages: [{ role: 'user', content: 'b'.repeat(2 * 1024 * 1024) }] })),
+  });
+  await assert.rejects(fake.run(runOptions({ onModelRequest: async () => { calls++; return { role: 'assistant', content: [] }; } })), error => {
+    assert.equal(error.code, 'FRAME_LIMIT');
+    assert.equal(error.runtime.transport.limit.kind, 'model-context');
+    assert.equal(error.runtime.transport.limit.limitBytes, MAX_FRAME_BYTES);
+    assert.equal(failureReceipt(error).code, 'FRAME_LIMIT');
+    assert.equal(error.runtime.cleanup.confirmed, true);
+    return true;
+  });
+  assert.equal(calls, 1);
+});
+
+test('cumulative diagnostic output remains bounded and differs from the per-frame failure', async () => {
+  const fake = fakeDocker({ onStart: ({ child }) => child.stderr.write('private-fixture-token'.repeat(900000)) });
+  await assert.rejects(fake.run(runOptions()), error => {
+    const receipt = failureReceipt(error);
+    assert.equal(error.code, 'OUTPUT_LIMIT');
+    assert.equal(receipt.code, 'OUTPUT_LIMIT');
+    assert.equal(receipt.transport.limit.kind, 'worker-output');
+    assert.ok(receipt.transport.stderrBytes > 16 * 1024 * 1024);
+    assert.doesNotMatch(JSON.stringify(receipt), /private-fixture-token/);
+    assert.equal(receipt.usage.calls.started, 0);
+    assert.equal(error.runtime.cleanup.confirmed, true);
+    return true;
+  });
+});
+
+test('provider error replies and oversized replies retain observed usage without leaking response text', async () => {
+  const reported = { input: 10, output: 2, cacheRead: 50, cacheWrite: 0, totalTokens: 62 };
+  for (const oversized of [false, true]) {
+    const fake = fakeDocker({ modelErrorFrame: workerFailureFrame(request.requestId, scoutFailure('MODEL_REQUEST_FAILED')) });
+    await assert.rejects(fake.run(runOptions({ onModelRequest: async () => ({ role: 'assistant',
+      content: [{ type: 'text', text: oversized ? 'x'.repeat(MAX_FRAME_BYTES) : 'private-fixture-token' }],
+      stopReason: oversized ? 'stop' : 'error', errorMessage: 'private-fixture-token', usage: reported }) })), error => {
+      const receipt = failureReceipt(error);
+      assert.equal(receipt.code, oversized ? 'FRAME_LIMIT' : 'MODEL_REQUEST_FAILED');
+      assert.deepEqual(receipt.usage.tokens, reported);
+      assert.equal(receipt.usage.calls.started, 1);
+      assert.equal(receipt.usage.calls.measured, 1);
+      assert.equal(receipt.usage.coverage, 'complete');
+      assert.equal(receipt.cleanup, 'confirmed');
+      assert.doesNotMatch(JSON.stringify(receipt), /private-fixture-token/);
+      if (oversized) assert.equal(receipt.transport.limit.kind, 'host-frame');
+      return true;
+    });
+  }
+});
+
+test('cancellation freezes pending usage and a late provider response cannot mutate the returned receipt', async () => {
+  const control = new AbortController(), fake = fakeDocker();
+  let resolveProvider, runtime;
+  await assert.rejects(fake.run(runOptions({ signal: control.signal,
+    onModelRequest: () => new Promise(resolve => { resolveProvider = resolve; queueMicrotask(() => control.abort()); }),
+  })), error => {
+    runtime = error.runtime;
+    assert.equal(runtime.modelCallbackSettled, false);
+    assert.equal(runtime.cleanup.confirmed, true);
+    assert.equal(runtime.usage.calls.pending, 1);
+    assert.equal(runtime.usage.coverage, 'unavailable');
+    assert.equal(failureReceipt(error).code, 'MODEL_CLIENT_UNSETTLED');
+    return true;
+  });
+  const frozen = JSON.stringify(runtime.usage);
+  resolveProvider({ role: 'assistant', content: [], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2 } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(JSON.stringify(runtime.usage), frozen);
+  assert.equal(fake.state.modelResponses.length, 0);
+});
+
+test('sanitized native callback failures carry reported counters into the final failure receipt', async () => {
+  const reported = { input: 7, output: 1, cacheRead: 20, cacheWrite: 0, totalTokens: 28 };
+  const fake = fakeDocker({ modelErrorFrame: workerFailureFrame(request.requestId, scoutFailure('MODEL_REQUEST_FAILED')) });
+  await assert.rejects(fake.run(runOptions({ onModelRequest: async () => {
+    throw Object.assign(scoutFailure('MODEL_REQUEST_FAILED'), { reportedUsage: { ...reported, raw: 'secret-fixture-token' } });
+  } })), error => {
+    assert.equal(failureReceipt(error).code, 'MODEL_REQUEST_FAILED');
+    assert.deepEqual(failureReceipt(error).usage.tokens, reported);
+    assert.doesNotMatch(JSON.stringify(error.runtime), /secret-fixture-token/);
+    return true;
+  });
 });
