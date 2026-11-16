@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0 — 2026-11-16
+
+- Show bounded saved research topics, sourced or unverified findings, gaps and
+  saved provenance in compatible Daddy dashboards. Keep partial evidence and the
+  latest failure separate from current readiness.
+- Retain a private workspace reference index for human terminal previews after
+  `/new`, with explicit limited history and exact bounded reads. Preserve existing
+  model-facing branch and destination permissions; refresh makes no provider,
+  authentication, search or research calls.
+- Refresh local Docker readiness only for proven local socket or named-pipe
+  endpoints. Preserve active-worker and unsettled-cleanup guards, and leave remote
+  endpoints untested. Local source readiness uses previously observed configuration.
+- Negotiate additive inventory support, retain legacy status compatibility, and
+  revoke pending previews on owner, model, access or workspace changes.
+
 ## 0.2.5 — 2026-11-16
 
 - Explain when a known Docker connection failure stopped setup before a research

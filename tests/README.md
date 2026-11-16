@@ -34,3 +34,16 @@ Pi 1.5.2 with Daddy 0.57.0, and the affected native compatibility subset passed
 21/21 on Pi 1.4.0 with Daddy 0.57.0; neither run skipped a test. These are distinct
 runtime checks, not 107 unique scenarios. No fixture contacts the official URLs
 it names. Live search availability remains a separate question.
+
+The dashboard inventory batch adds bounded workspace retention, `/new`, explicit
+unknown history, partial/complete coverage, later failure preservation, legacy
+host negotiation, human-only previews with unchanged model-facing permissions,
+owner/model/cancellation/replacement revocation, and fake local Docker readiness
+including remote-endpoint refusal, WSL fallback and timeout. These fixtures do not
+launch Docker, resolve live provider auth, fetch sources or repeat research.
+For the new host-schema integration, set `SCOUT_DASHBOARD_CONTRACT` to the explicitly
+selected Daddy `src/kernel/dashboard-observation.ts` (or built equivalent).
+That check uses the real host validator to verify complete native Scout snapshots,
+including long retained failure details; it skips explicitly when no host contract
+is selected. The legacy Daddy renderer remains independently exercised through
+`SCOUT_DADDY_ROOT`.
