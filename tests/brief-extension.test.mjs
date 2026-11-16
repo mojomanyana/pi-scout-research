@@ -48,6 +48,10 @@ test('native local save/read and trusted peer resolver enforce branch, destinati
   const [hook] = local.handlers.get('context');
   const restored = await hook({messages:[]},ctx);
   assert.equal(restored.messages[0].content.includes('Fixture only'),false);
+  const placed = await hook({messages:[{role:'user',content:'Save'},{role:'toolResult',toolCallId:'call',toolName:'research_brief',details:saved},
+    {role:'assistant',content:[]},{role:'user',content:'Continue'}]},ctx);
+  assert.deepEqual(placed.messages.map(message=>message.customType??message.role),['user','toolResult','scout-brief-context','assistant','user']);
+  assert.equal(placed.messages[2].content,restored.messages[0].content);
   endpoint = 'https://different.example/v1';
   assert.equal((await invoke(reader,'scout_brief_read',{reference:saved.reference})).details.status,'denied');
   endpoint = 'https://provider.example/v1'; branch = [];

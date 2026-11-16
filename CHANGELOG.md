@@ -13,6 +13,13 @@
 - Add an offline control that asks the installed Daddy's own child-delivery rule,
   so these documents and the sibling package cannot silently disagree again. Test
   dependencies now select pi-daddy 0.59.1.
+- Keep the saved-reference notice at a stable position in the model request instead
+  of re-appending it after the newest message, so provider prompt caching of earlier
+  conversation is not disturbed on every request. The notice follows the tool
+  results of the turn that saved the brief, or leads the context after summaries
+  when that result is no longer present. Its text, the selected reference and all
+  branch, destination and read checks are unchanged. The cost effect has not been
+  measured.
 
 ## 0.3.1 — 2026-11-16
 

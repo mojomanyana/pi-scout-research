@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { WebProfile } from '../lib/web-profile.mjs';
 import { Catalog } from '../lib/catalog.mjs';
 import { BriefStore, validateBrief, briefOutcome } from '../lib/brief.mjs';
-import { referenceNotice, destinationIdentity } from '../lib/brief-reference.mjs';
+import { destinationIdentity } from '../lib/brief-reference.mjs';
+import { placeReferenceNotice } from '../lib/notice-placement.mjs';
 import { scoutStatus } from './status.ts';
 import { scoutOwner } from './owner.ts';
 import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
@@ -113,12 +114,6 @@ export default function research(pi: ExtensionAPI) {
       return { block: true, reason: 'This profile permits approved source fetching only; discovery is not authorized' };
     }
   });
-  pi.on('context', async (event, ctx) => {
-    const notice = referenceNotice(ctx.sessionManager.getBranch(), 'local');
-    const messages = event.messages.filter(message => !(message.role === 'custom' && message.customType === 'scout-brief-context'));
-    if (!notice) return messages.length === event.messages.length ? undefined : { messages };
-    return { messages: [...messages, { role: 'custom', customType: 'scout-brief-context',
-      content: notice,
-      display: false, timestamp: Date.now() }] };
-  });
+  pi.on('context', async (event, ctx) =>
+    placeReferenceNotice(event.messages, ctx.sessionManager.getBranch(), 'local', Date.now()));
 }

@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { BriefStore } from '../lib/brief.mjs';
-import { referenceNotice, destinationIdentity } from '../lib/brief-reference.mjs';
+import { destinationIdentity } from '../lib/brief-reference.mjs';
+import { placeReferenceNotice } from '../lib/notice-placement.mjs';
 import { createRequest, validateSources } from '../lib/worker-protocol.mjs';
 import { runScout } from '../lib/docker-worker.mjs';
 import { prepareWorker } from '../lib/worker-setup.mjs';
@@ -140,13 +141,6 @@ export default function scoutWorker(pi: ExtensionAPI) {
       } finally { busy = false; if (owner.current()) observe.sync(); }
     },
   });
-  pi.on('context', async (event, ctx) => {
-    const notice = referenceNotice(ctx.sessionManager.getBranch(), 'worker');
-    const messages = event.messages.filter(message =>
-      !(message.role === 'custom' && message.customType === 'scout-worker-context'));
-    if (!notice) return messages.length === event.messages.length ? undefined : { messages };
-    return { messages: [...messages, { role: 'custom', customType: 'scout-worker-context',
-      content: notice,
-      display: false, timestamp: Date.now() }] };
-  });
+  pi.on('context', async (event, ctx) =>
+    placeReferenceNotice(event.messages, ctx.sessionManager.getBranch(), 'worker', Date.now()));
 }

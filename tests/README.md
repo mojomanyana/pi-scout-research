@@ -53,3 +53,9 @@ That check uses the real host validator to verify complete native Scout snapshot
 including long retained failure details; it skips explicitly when no host contract
 is selected. The legacy Daddy renderer remains independently exercised through
 `SCOUT_DADDY_ROOT`.
+
+The reference-notice placement controls use synthetic Pi context messages and the
+natively loaded context handlers. They check that the notice keeps one position
+while later requests grow, stays after all tool results of the turn that saved the
+brief, and otherwise leads the context after summaries. They send no provider
+request and do not measure prompt-cache reads or cost.
