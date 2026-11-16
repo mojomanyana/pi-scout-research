@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.1 — 2026-11-16
 
 - Negotiate append-only model context transfers so later research turns do not
   repeatedly spend the worker's output budget on the same conversation prefix.
