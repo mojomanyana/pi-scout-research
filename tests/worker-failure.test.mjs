@@ -110,6 +110,28 @@ test('public receipts omit private runtime data and distinguish observations fro
   assert.ok(shown.length < 4000);
 });
 
+test('only an unblocked Docker connection failure during setup establishes that no worker started', () => {
+  const error = scoutFailure('DOCKER_UNAVAILABLE');
+  const receipt = failureReceipt(error, { requestId, phase: 'setup' });
+  assert.equal(receipt.workerStarted, false);
+  assert.equal(receipt.cleanup, 'unknown');
+  assert.equal(receipt.furtherWorkBlocked, false);
+  assert.match(failureText(receipt), /no worker cleanup needed for this attempt/);
+  for (const [failure, options] of [
+    [error, {}],
+    [error, { phase: 'research' }],
+    [error, { phase: 'setup', cleanupBlocked: true }],
+    [Object.assign(scoutFailure('DOCKER_UNAVAILABLE'), { runtime: {} }), { phase: 'setup' }],
+    [scoutFailure('SETUP_BUILD'), { phase: 'setup' }],
+    [scoutFailure('WORKER_FAILED'), { phase: 'setup' }],
+    [scoutFailure('SETUP_UNSETTLED'), { phase: 'setup', cleanupBlocked: true }],
+  ]) {
+    const other = failureReceipt(failure, { requestId, ...options });
+    assert.equal(Object.hasOwn(other, 'workerStarted'), false);
+    assert.doesNotMatch(failureText(other), /no worker cleanup needed|retry Scout through its normal tool/);
+  }
+});
+
 test('receipt lifecycle outcomes remain authoritative over research error categories', () => {
   for (const [runtime, expected] of [
     [{ cleanup: { confirmed: false }, modelCallbackSettled: true }, 'CLEANUP_FAILED'],
@@ -119,6 +141,8 @@ test('receipt lifecycle outcomes remain authoritative over research error catego
     const receipt = failureReceipt(error, { requestId, cleanupBlocked: true });
     assert.equal(receipt.code, expected);
     assert.equal(receipt.furtherWorkBlocked, true);
+    assert.equal(Object.hasOwn(receipt, 'workerStarted'), false);
+    assert.doesNotMatch(failureText(receipt), /no worker cleanup needed|retry Scout through its normal tool/);
     const workerError = Object.assign(new Error('discarded'), { code: 'WORKER_ERROR', runtime: {
       ...runtime, failure: { code: 'SOURCE_FETCH_FAILED', origin: 'worker-reported' } } });
     assert.equal(failureReceipt(workerError).origin, 'host-observed');

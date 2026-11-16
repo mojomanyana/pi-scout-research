@@ -177,7 +177,12 @@ test('first use without setup variables prepares Docker before dispatch and allo
   const failed = await invoke();
   assert.equal(failed.isError, true);
   assert.equal(failed.details.failure.code, 'DOCKER_UNAVAILABLE');
-  assert.match(failed.content[0].text, /Start Docker/);
+  assert.equal(failed.details.failure.cleanup, 'unknown');
+  assert.equal(failed.details.failure.workerStarted, false);
+  assert.equal(failed.details.failure.furtherWorkBlocked, false);
+  assert.match(failed.content[0].text, /Once the selected Docker connection is reachable, retry Scout through its normal tool/);
+  assert.match(failed.content[0].text, /Research worker not started; no worker cleanup needed for this attempt/);
+  assert.doesNotMatch(failed.content[0].text, /Worker cleanup: (unknown|confirmed)/);
   assert.equal(fx.entries[0].customType, 'scout-worker-failure-v1');
   assert.equal(launches, 0);
   const result = await invoke();
@@ -198,6 +203,8 @@ test('an unsettled worker blocks another invocation and cannot publish a brief',
   assert.equal(failed.isError, true);
   assert.equal(failed.details.failure.code, 'CLEANUP_FAILED');
   assert.equal(failed.details.failure.furtherWorkBlocked, true);
+  assert.equal(Object.hasOwn(failed.details.failure, 'workerStarted'), false);
+  assert.doesNotMatch(failed.content[0].text, /no worker cleanup needed|retry Scout through its normal tool/);
   await assert.rejects(invoke(), /did not settle/);
   assert.equal(launches, 1);
   assert.deepEqual(fx.entries.map(entry => entry.customType), ['scout-worker-failure-v1']);
@@ -234,6 +241,9 @@ test('unsettled setup prevents duplicate builds or worker launches in the same s
   assert.equal(failed.isError, true);
   assert.equal(failed.details.failure.code, 'SETUP_UNSETTLED');
   assert.equal(failed.details.failure.furtherWorkBlocked, true);
+  assert.equal(failed.details.failure.cleanup, 'unknown');
+  assert.equal(Object.hasOwn(failed.details.failure, 'workerStarted'), false);
+  assert.doesNotMatch(failed.content[0].text, /no worker cleanup needed|retry Scout through its normal tool/);
   await assert.rejects(invoke(), /earlier Scout setup/);
   assert.equal(preparations, 1);
   assert.equal(launches, 0);
