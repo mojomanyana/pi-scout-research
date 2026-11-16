@@ -4,21 +4,22 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { WebProfile } from '../lib/web-profile.mjs';
 import { Catalog } from '../lib/catalog.mjs';
-import { BriefStore, validateBrief } from '../lib/brief.mjs';
+import { BriefStore, validateBrief, briefOutcome } from '../lib/brief.mjs';
 import { referenceNotice, destinationIdentity } from '../lib/brief-reference.mjs';
 import { scoutStatus } from './status.ts';
 import { scoutOwner } from './owner.ts';
+import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
 
 const text = (maxLength = 4000) => Type.String({ minLength: 1, maxLength });
 const citation = Type.Object({ sourceId: text(64), start: Type.Integer({ minimum: 1 }),
   end: Type.Integer({ minimum: 1 }), quote: text(1000) }, { additionalProperties: false });
 
 export default function research(pi: ExtensionAPI) {
-  const observe = scoutStatus(pi, 'local');
   const captureOwner = scoutOwner(pi);
   // Only the operator's process environment selects input and storage locations.
   const sourceFile = process.env.PI_SCOUT_CATALOG;
   const profileFile = process.env.PI_SCOUT_WEB_PROFILE;
+  let observedSourceCount: number | undefined = sourceFile || profileFile ? undefined : 0;
   let catalogPromise: Promise<Catalog> | undefined;
   let profilePromise: Promise<WebProfile | undefined> | undefined;
   const profile = () => profilePromise ??= profileFile ? WebProfile.open(profileFile) : Promise.resolve(undefined);
@@ -26,11 +27,19 @@ export default function research(pi: ExtensionAPI) {
     const base = await (catalogPromise ??= sourceFile ? Catalog.open(sourceFile) : Promise.resolve(new Catalog({ version: 1, sources: [] })));
     const web = await profile();
     if (web?.list().some(source => base.has(source.id))) throw new Error('Local and web source IDs must not overlap');
-    return ctx.sessionManager.getBranch().reduce((current, entry) =>
+    const current = ctx.sessionManager.getBranch().reduce((current, entry) =>
       entry.type === 'custom' && entry.customType === 'scout-source-v1' && web?.matches(entry.data)
         ? current.with(entry.data) : current, base);
+    observedSourceCount = current.list().length + (web?.list() ?? []).filter(source => !current.has(source.id)).length;
+    return current;
   };
   const pending = new Map<string, Promise<unknown>>();
+  const observe = scoutStatus(pi, 'local', { readiness: async () => {
+    if (observedSourceCount === undefined) return { state: 'unknown', label: 'Local sources not checked',
+      details: ['Configured files have not been read by a research tool yet. Dashboard refresh does not open source configurations.'] };
+    return { state: 'observed', label: observedSourceCount ? `${observedSourceCount} local session sources configured` : 'No local sources configured',
+      details: ['Last observed local source configuration; no source was fetched for this refresh. Public Docker research is separate.'] };
+  } });
   const store = new BriefStore(process.env.PI_SCOUT_BRIEFS ?? join(homedir(), '.pi-scout-research', 'briefs'));
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: value });
 
@@ -81,12 +90,16 @@ export default function research(pi: ExtensionAPI) {
     }, { additionalProperties: false }),
     async execute(_id, args, _signal, _update, ctx) {
       const owner = captureOwner(ctx);
+      const workspace = await workspaceIdentity(ctx.cwd).catch(() => undefined);
       const destination = await destinationIdentity(ctx);
       const brief = validateBrief(args, await catalog(ctx));
       const saved = await store.save(owner.sessionId, brief);
       if (!owner.current()) return result({ saved: true, outputWithheld: true, reason: 'owner-changed' });
-      pi.appendEntry('scout-brief-v2', { reference: saved.reference, destination });
-      observe(ctx, 'settled', ['Brief saved locally; sources may require freshness checks.']);
+      const retained = { reference: saved.reference, destination, savedAt: new Date().toISOString(), researchStatus: briefOutcome(brief) };
+      pi.appendEntry('scout-brief-v2', retained);
+      const indexed = workspace && await rememberWorkspaceBrief(store.root, workspace, { ...retained, kind: 'local' }, { authorize: owner.current });
+      if (!owner.current()) return result({ saved: true, outputWithheld: true, reason: 'owner-changed' });
+      observe(ctx, 'settled', ['Brief saved locally; sources may require freshness checks.', ...(indexed ? [] : ['Workspace inventory is incomplete; the saved branch reference remains usable.'])]);
       return result({ saved: true, reference: saved.reference, semanticApproval: false });
     },
   });

@@ -24,6 +24,21 @@ Private brief files use content-addressed exclusive creation. Pi tool results re
 
 The worker's Docker log driver is disabled. The private model exchange travels through the attached pipe without a second persistent Docker stdout log. The parent stores the returned answer, sources and brief; it does not save raw worker model contexts as diagnostic output.
 
+The optional terminal inventory has a separate human-only local display grant:
+the trusted current dashboard owner may preview exact references recorded for
+the current canonical workspace, or the active branch with explicit limited
+coverage. New saves write a bounded, private, atomic reference index; no background
+scan attributes older sessions to a project. Workspace replacement, lost ownership,
+host cancellation and removed access are checked before and after exact body reads.
+The display does not resolve provider authentication, inject bodies into model
+context, authorize a model-facing read after `/new`, or change peer disclosure
+checks. It is intended for the human viewing this local terminal, not a new remote
+consumer or access boundary against hostile processes with the host account.
+Readiness refresh invokes only bounded local Docker client checks after proving
+the selected endpoint is a Unix socket or named pipe; remote endpoints remain
+untested. It has no worker-launch, image-build, retry, cleanup-clear or approval
+authority. Saved findings, gaps and actual current readiness remain separate.
+
 Failure diagnostics use a fixed vocabulary selected at known code boundaries.
 Versioned worker error frames are bound to the request and allowlist; unknown codes,
 extra fields and mismatched requests are protocol failures. Legacy worker error text

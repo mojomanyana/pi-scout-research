@@ -11,9 +11,9 @@ import { prepareWorker } from '../lib/worker-setup.mjs';
 import { scoutFailure, failureReceipt, failureText } from '../lib/worker-failure.mjs';
 import { scoutStatus } from './status.ts';
 import { scoutOwner } from './owner.ts';
+import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
 
 export default function scoutWorker(pi: ExtensionAPI) {
-  const observe = scoutStatus(pi, 'worker');
   const captureOwner = scoutOwner(pi);
   const configuration = Object.fromEntries(['PI_SCOUT_WORKER_IMAGE', 'PI_SCOUT_WORKER_MODE',
     'PI_SCOUT_DOCKER_PATH', 'PI_SCOUT_DOCKER_HOST'].flatMap(key =>
@@ -21,6 +21,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
   const briefs = new BriefStore(process.env.PI_SCOUT_BRIEFS ?? join(homedir(), '.pi-scout-research', 'briefs'));
   let busy = false;
   let cleanupBlocked = false;
+  const observe = scoutStatus(pi, 'worker', { dockerConfiguration: configuration, workerState: () => ({ busy, cleanupBlocked }) });
   pi.registerTool({
     name: 'scout_research', label: 'Scout research',
     description: 'Research a public question in a separate Docker worker and return a sourced brief, explicitly incomplete when gaps remain. Use for external facts, documentation, comparisons and investigation. Optionally supply known exact official documentation URLs in sourceUrls so the worker can fetch them directly without a search prerequisite. Send only public question, scope and URLs, never private repository contents, credentials or conversation history. The worker uses the current Pi model through the parent; Docker public mode does not enforce every outbound URL. No publishing or implementation work.',
@@ -41,6 +42,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
       let phase = 'setup';
       busy = true;
       try {
+        const workspace = await workspaceIdentity(ctx.cwd).catch(() => undefined);
         observe(ctx, 'running', ['Preparing isolated research worker.']);
         const destination = await destinationIdentity(ctx);
         let sources = [];
@@ -80,17 +82,26 @@ export default function scoutWorker(pi: ExtensionAPI) {
         let saved;
         try { saved = await briefs.save(owner.sessionId, completed.result.brief); }
         catch { throw Object.assign(scoutFailure('BRIEF_STORAGE_FAILED'), { runtime: completed.runtime }); }
-        const currentDestination = await destinationIdentity(ctx);
+        // Preserve the pre-append destination/owner fence, then recheck after optional indexing.
+        await destinationIdentity(ctx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
         const incomplete = completed.result.status === 'incomplete';
-        pi.appendEntry('scout-worker-brief-v2', { requestId: request.requestId,
+        const retained = { requestId: request.requestId,
           reference: saved.reference, destination, image, mode,
+          savedAt: new Date().toISOString(),
           ...(completed.result.issue ? { researchIssue: completed.result.issue } : {}),
-          researchStatus: incomplete ? 'incomplete' : (completed.result.status === 'complete' ? 'complete' : 'unknown') });
+          researchStatus: incomplete ? 'incomplete' : (completed.result.status === 'complete' ? 'complete' : 'unknown') };
+        pi.appendEntry('scout-worker-brief-v2', retained);
+        const indexed = workspace && await rememberWorkspaceBrief(briefs.root, workspace, { ...retained, kind: 'worker' }, { authorize: owner.current });
+        if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
+          details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
+        const currentDestination = await destinationIdentity(ctx);
+        if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
+          details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
         observe(ctx, incomplete ? 'observed' : 'settled', [incomplete
           ? 'Partial findings saved; gaps remain. Worker cleanup confirmed. No human decision is requested by this record.'
-          : 'Worker cleanup confirmed; brief retained.']);
+          : 'Worker cleanup confirmed; brief retained.', ...(indexed ? [] : ['Workspace inventory is incomplete; the saved branch reference remains usable.'])]);
         if (JSON.stringify(currentDestination) !== JSON.stringify(destination)) {
           return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: 'Scout saved its research record, but the model destination changed. Retrieve the exact reference only after authorizing the new destination.' }],
             details: { briefReference: saved.reference, outputWithheld: true, cleanup: completed.runtime.cleanup,
@@ -122,7 +133,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         catch { /* A session-write error must not hide the original failure. */ }
         observe(ctx, cleanupBlocked ? 'unknown' : 'failed', [failure.summary, failure.nextStep]);
         return { isError: true, content: [{ type: 'text', text: `${failureText(failure)}\nFailure record: ${retained ? 'saved in this Pi session' : 'not saved; retain this tool result'}.` }], details: { failure, retained } };
-      } finally { busy = false; }
+      } finally { busy = false; if (owner.current()) observe.sync(); }
     },
   });
   pi.on('context', async (event, ctx) => {

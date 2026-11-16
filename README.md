@@ -9,7 +9,7 @@ The skill does not depend on Principal, pi-daddy or skill-harness. Those package
 With Pi and Docker running on the same computer, install Scout:
 
 ```bash
-pi install npm:pi-scout-research@0.2.5
+pi install npm:pi-scout-research@0.3.0
 ```
 
 Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
@@ -29,7 +29,7 @@ export PI_SCOUT_DOCKER_PATH='/mnt/c/Program Files/Docker/Docker/resources/bin/do
 export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 ```
 
-`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.2.5 scout-worker-build`, but first-use preparation performs the same work automatically.
+`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.3.0 scout-worker-build`, but first-use preparation performs the same work automatically.
 
 Governed children need Scout in their selected resources and permission for `scout_research`; no Docker command or image parameter is supplied by the model. A child Pi with the tool loaded owns its worker lifecycle.
 
@@ -129,7 +129,7 @@ If the session changes before failure, diagnostics are withheld from the new bra
 
 `/skill:research` works without Docker using available Pi research tools. Installing the package alone does not isolate host tools. The `scout_research` tool always uses its Docker worker and prepares it automatically; Docker errors do not silently enable host web access.
 
-The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.2.3 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
+The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.3.0 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
 
 ```json
 [{"id":"release","title":"Release notes","path":"./release-notes.txt","locator":"local:release-notes.txt"}]
@@ -161,8 +161,37 @@ assistant prose or compaction summaries from Pi history.
 
 When Daddy is present, Scout contributes observed worker and retained-brief
 status to its terminal dashboard, including whether retained research is incomplete.
-This optional display connection creates no
-model calls, timer, dispatch authority or additional evidence store.
+On hosts that advertise inventory support, the visible dashboard can also refresh
+bounded saved questions, a finding and gap preview, cited-source counts and saved
+provenance. Reported complete coverage remains separate from semantic approval.
+The latest failure stays separate from saved findings and current readiness.
+
+New saves maintain a private workspace reference index (at most 40 references and
+64 KiB), bound to the canonical workspace and its filesystem identity. It contains
+metadata and exact references, never another copy of brief bodies. This supports
+the human terminal view after `/new`. A failed index write cannot fail research;
+the branch reference remains usable and inventory is explicitly incomplete.
+Missing indexes mean history is unknown, not that research is empty. Legacy branch
+references have limited branch coverage; Scout never scans the whole brief store
+or retroactively attributes other sessions to a workspace. At most six exact
+briefs are previewed per refresh, within the dashboard's 8 KiB inventory budget.
+
+Terminal previews use a separate human-only workspace read grant. They are never
+inserted into model context and do not expand `scout_brief_read` or trusted-peer
+destination permissions. Owner changes, cancellation, removed references and
+deleted or replaced workspaces revoke pending previews. Refresh resolves no
+provider authentication and makes no model, search or research calls.
+
+Worker readiness checks only the selected local Unix-socket or named-pipe Docker
+engine, with bounded commands and the same explicit client/host and WSL fallback
+selection. Remote or unknown endpoints are left untested. “Local Docker reachable”
+does not certify the image or model, or clear an unsettled cleanup guard. Local
+source configuration is reported separately and an empty local catalog does not
+block public worker research. Configured local files remain “not checked” until a
+normal research tool reads them; passive refresh uses the last observed count.
+Refresh never builds an image, starts a worker,
+repeats retrievals or retries a research request. Older Daddy hosts receive the
+legacy status fields only.
 
 
 
