@@ -115,5 +115,5 @@ export default function research(pi: ExtensionAPI) {
     }
   });
   pi.on('context', async (event, ctx) =>
-    placeReferenceNotice(event.messages, ctx.sessionManager.getBranch(), 'local', Date.now()));
+    placeReferenceNotice(event.messages, ctx.sessionManager.getBranch(), 'local'));
 }

@@ -142,5 +142,5 @@ export default function scoutWorker(pi: ExtensionAPI) {
     },
   });
   pi.on('context', async (event, ctx) =>
-    placeReferenceNotice(event.messages, ctx.sessionManager.getBranch(), 'worker', Date.now()));
+    placeReferenceNotice(event.messages, ctx.sessionManager.getBranch(), 'worker'));
 }

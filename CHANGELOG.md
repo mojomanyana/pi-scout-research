@@ -17,9 +17,10 @@
   of re-appending it after the newest message, so provider prompt caching of earlier
   conversation is not disturbed on every request. The notice follows the tool
   results of the turn that saved the brief, or leads the context after summaries
-  when that result is no longer present. Its text, the selected reference and all
-  branch, destination and read checks are unchanged. The cost effect has not been
-  measured.
+  when that result is no longer present. Saving a newer brief moves the notice once,
+  to the newer result; until then the inserted message is identical on every
+  request. Its text, the selected reference and all branch, destination and read
+  checks are unchanged. The cost effect has not been measured.
 
 ## 0.3.1 — 2026-11-16
 

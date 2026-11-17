@@ -13,10 +13,10 @@ const entry = (kind, reference, data = {}) => ({ type: 'custom', customType: `${
 const user = content => ({ role: 'user', content, timestamp: 1 });
 const assistant = (...calls) => ({ role: 'assistant', stopReason: calls.length ? 'toolUse' : 'stop', timestamp: 1,
   content: calls.length ? calls.map(([id, name]) => ({ type: 'toolCall', id, name, arguments: {} })) : [{ type: 'text', text: 'Reply' }] });
-const toolResult = (toolCallId, toolName, details, isError = false) => ({ role: 'toolResult', toolCallId, toolName,
-  content: [{ type: 'text', text: 'Fixture output' }], details, isError, timestamp: 1 });
-const saved = (kind, reference, id = 'save') => toolResult(id, KINDS[kind].tool, KINDS[kind].details(reference));
-const place = (messages, entries, kind = 'worker', timestamp = 7) => placeReferenceNotice(messages, entries, kind, timestamp).messages;
+const toolResult = (toolCallId, toolName, details, isError = false, timestamp = 1) => ({ role: 'toolResult', toolCallId, toolName,
+  content: [{ type: 'text', text: 'Fixture output' }], details, isError, timestamp });
+const saved = (kind, reference, id = 'save', timestamp = 1) => toolResult(id, KINDS[kind].tool, KINDS[kind].details(reference), false, timestamp);
+const place = (messages, entries, kind = 'worker') => placeReferenceNotice(messages, entries, kind).messages;
 const position = (messages, kind = 'worker') => messages.findIndex(message => message.role === 'custom' && message.customType === KINDS[kind].notice);
 const without = (messages, kind = 'worker') => messages.filter(message => message.customType !== KINDS[kind].notice);
 
@@ -26,20 +26,20 @@ test('the notice keeps one position and an unchanged prefix while later requests
   // lib/notice-placement.mjs fails the position assertions below.
   for (const kind of ['worker', 'local']) {
     const entries = [entry(kind, first)];
-    const turn = [user('Research this'), assistant(['save', KINDS[kind].tool]), saved(kind, first)];
+    const turn = [user('Research this'), assistant(['save', KINDS[kind].tool]), saved(kind, first, 'save', 42)];
     const requests = [turn,
       [...turn, assistant(), user('Continue')],
       [...turn, assistant(), user('Continue'), assistant(['read', 'read']), toolResult('read', 'read'), user('And then?')]];
-    const placed = requests.map((messages, index) => place(messages, entries, kind, index));
+    const placed = requests.map(messages => place(messages, entries, kind));
     for (const [index, messages] of placed.entries()) {
       assert.equal(position(messages, kind), 3, 'The notice directly follows the tool result that saved the brief');
       assert.deepEqual(messages.slice(0, 3), placed[0].slice(0, 3), 'Earlier conversation is unchanged from request to request');
-      assert.deepEqual({ ...messages[3], timestamp: 0 }, { role: 'custom', customType: KINDS[kind].notice,
-        content: referenceNotice(entries, kind), display: false, timestamp: 0 });
-      assert.equal(messages[3].timestamp, index);
+      // The whole inserted message is identical on every request: its timestamp is the originating result's, not the clock's.
+      assert.deepEqual(messages[3], { role: 'custom', customType: KINDS[kind].notice,
+        content: referenceNotice(entries, kind), display: false, timestamp: 42 });
       assert.deepEqual(without(messages, kind), requests[index], 'No conversation message is dropped, copied or reordered');
     }
-    assert.deepEqual(place([...placed[1], assistant()], entries, kind, 1), [...placed[1], assistant()], 'A carried-over notice is replaced in place');
+    assert.deepEqual(place([...placed[1], assistant()], entries, kind), [...placed[1], assistant()], 'A carried-over notice is replaced in place');
   }
 });
 
@@ -54,6 +54,16 @@ test('the notice never separates tool results of one assistant turn', () => {
       assert.deepEqual(messages.slice(2, 5), results);
       assert.deepEqual(without(messages), [...turn, ...later]);
     }
+  }
+  // Only tool results extend the run: any other message directly after it follows the notice, whatever its role.
+  const turn = [user('Research this'), assistant(['save', 'scout_research']), scout];
+  for (const follower of [{ role: 'custom', customType: 'another-extension', content: 'Note', display: true, timestamp: 1 },
+    { role: 'bashExecution', command: 'ls', output: '', exitCode: 0, cancelled: false, truncated: false, timestamp: 1 },
+    { role: 'branchSummary', summary: 'Abandoned branch', fromId: 'entry', timestamp: 1 },
+    { role: 'compactionSummary', summary: 'Earlier work', tokensBefore: 10, timestamp: 1 }]) {
+    const messages = place([...turn, follower, user('Continue')], entries);
+    assert.equal(position(messages), 3);
+    assert.deepEqual(without(messages), [...turn, follower, user('Continue')]);
   }
 });
 
@@ -74,6 +84,10 @@ test('without the originating result the notice leads after summaries and stays 
       assert.deepEqual(without(placed), messages);
     }
   }
+  // A leading notice takes the timestamp of the message before it, or zero when it is first.
+  assert.equal(place([{ ...summary, timestamp: 9 }, user('Continue')], entries)[1].timestamp, 9);
+  assert.equal(place([user('Start')], entries)[0].timestamp, 0);
+  assert.equal(place([], entries)[0].timestamp, 0);
   // A summary later in the conversation is not a leading message.
   assert.equal(position(place([user('Start'), assistant(), branch, user('Continue')], entries)), 0);
   // A newest legacy entry has no exact reference to locate, even when a result on the branch carries one.
@@ -101,10 +115,10 @@ test('placement is idempotent, leaves its input untouched and reports no change 
     assert.deepEqual(place(place(once, entries), entries), once);
   }
   const plain = [user('No research yet'), assistant()];
-  assert.equal(placeReferenceNotice(plain, [], 'worker', 7), undefined);
-  assert.equal(placeReferenceNotice([], [], 'local', 7), undefined);
-  assert.equal(placeReferenceNotice(plain, [entry('local', first)], 'worker', 7), undefined, 'Another producer\'s brief is not this notice');
-  assert.deepEqual(placeReferenceNotice([...plain, stale], [], 'worker', 7), { messages: plain });
+  assert.equal(placeReferenceNotice(plain, [], 'worker'), undefined);
+  assert.equal(placeReferenceNotice([], [], 'local'), undefined);
+  assert.equal(placeReferenceNotice(plain, [entry('local', first)], 'worker'), undefined, 'Another producer\'s brief is not this notice');
+  assert.deepEqual(placeReferenceNotice([...plain, stale], [], 'worker'), { messages: plain });
 });
 
 test('a newer brief moves the notice to the newer originating result', () => {
