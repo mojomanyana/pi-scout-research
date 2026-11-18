@@ -1,6 +1,6 @@
 ---
 name: scout-public
-description: Delegate public web research to Scout's Docker worker for external documentation, facts, comparisons and investigation. Use inline in the Pi session that has the scout_research tool, not as a delegated child agent. Returns a sourced answer and uncertainty. Prepares its worker automatically and uses the current Pi model; does not inspect or change the repository.
+description: Research public documentation, facts and comparisons through the callable scout_research tool. Use inline or as a governed child when Daddy explicitly offers its parent-run tool. Returns a sourced answer and uncertainty. The session hosting Scout prepares its worker automatically; does not inspect or change the repository.
 allowed-tools: scout_research
 ---
 
@@ -16,4 +16,6 @@ Report the worker's answer with its material source locators, conflicts and gaps
 
 Explain which claim or requirement depends on each missing fact, so dependent work can be distinguished from independent authorized work. Preserve explicit user stop conditions and evidence gates; whoever set those gates must resolve any proposed change to them. A partial brief alone does not establish that every part of the task is blocked.
 
-The tool uses standard Docker public mode by default; an explicit offline setting remains respected. Docker must be running, but the tool handles worker preparation. It does not promise that every outgoing request is approved. Model and resource settings remain operator-controlled. No code edits, publication, deployment or delegation are part of this skill. A pi-daddy governed child cannot call `scout_research`: do the research in this session and pass the answer and exact brief reference to any role that continues the work.
+The tool uses standard Docker public mode by default; an explicit offline setting remains respected. Docker must be running, but the session hosting Scout handles worker preparation and cleanup, including calls received through Daddy's parent-tool proxy. It does not promise that every outgoing request is approved. Model and resource settings remain operator-controlled. No code edits, publication, deployment or further delegation are part of this skill.
+
+Use `scout_research` only where it is actually callable. A coordinator may delegate this skill when Daddy explicitly offers `scout_research` as a parent-run tool for that child; a parent catalog entry or permission alone is insufficient. The supported proxy runs in the root session for a direct child using the root's provider and model, and cannot be forwarded to another child. If that route is unavailable, keep the research in the parent or coordinator session and pass the findings and exact brief reference to the role continuing the work. Do not assume a research proxy also supplies `scout_brief_read`; include the relevant findings in the handoff.

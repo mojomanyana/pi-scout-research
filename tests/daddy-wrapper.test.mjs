@@ -31,10 +31,9 @@ test('native Daddy parses Scout as a narrow optional definition with only the re
     assert.deepEqual(unknownCapabilities(['tool:bash'], catalog), ['tool:bash']);
   });
 
-// A parent catalog entry is not child delivery. README.md and scout-public/SKILL.md say scout_research
-// stays in the parent session because Daddy refuses to deliver it to a governed child. This asks the
-// installed Daddy's own planner rule, so the suite fails the day those documents and the sibling package
-// disagree again. When child delivery is actually built, flip this assertion and the documents together.
+// A parent catalog entry is not child delivery. Ask the installed planner about both the unsupported
+// catalog-only case and, when the host offers it, the explicit parent-tool route. This remains usable
+// with the released host without requiring a coordinated Daddy upgrade.
 const childTools = daddy && join(daddy, 'dist/kernel/child-tools.js');
 // Only a Daddy older than the rule may lack the module; a later one without it must fail here, not skip.
 const predatesRule = () => {
@@ -44,7 +43,7 @@ const predatesRule = () => {
     return major === 0 && minor < 57;
   } catch { return false; }
 };
-test('installed Daddy refuses to deliver scout_research to a governed child, so documented use stays in the parent',
+test('installed Daddy delivers research only through an available supported parent-tool route',
   { skip: roots || (predatesRule() && 'Installed Pi Daddy predates its child tool delivery rule (0.57.0)') }, async t => {
     assert.ok(existsSync(childTools), 'Pi Daddy 0.57.0 or later without dist/kernel/child-tools.js: recheck child delivery and the README');
     const root = await isolatedDaddy(t);
@@ -62,4 +61,25 @@ test('installed Daddy refuses to deliver scout_research to a governed child, so 
     assert.deepEqual(refused.details, { kind: 'child-tool-unavailable', tools: 'scout_research' });
     assert.match(refused.message, /child tool unavailable: scout_research/);
     assert.equal(childToolDeliveryRefusal(['tool:read'], { childToolSources }), undefined);
+    const parentToolsModule = resolve(root, 'package/dist/kernel/parent-tools.js');
+    if (!existsSync(parentToolsModule)) return; // Released hosts without the proxy use the parent directly.
+    const { parentProxiedTools } = await import(pathToFileURL(parentToolsModule));
+    const facts = {
+      childToolSources,
+      depth: 0,
+      autoModeRef: { socketPath: join(root, 'unused-owner.sock'), token: 'a'.repeat(48) },
+      parentToolExtensionPath: join(root, 'package/extensions/parent-tool-proxy.ts'),
+      parentTools: [{ name: 'scout_research', description: 'Research public documentation',
+        parameters: { type: 'object', properties: { question: { type: 'string' } }, required: ['question'] } }],
+      rootModel: { provider: 'fixture', id: 'model' },
+      childModel: 'fixture/model',
+    };
+    assert.deepEqual(parentProxiedTools(requested, facts).map(tool => tool.name), ['scout_research']);
+    assert.equal(childToolDeliveryRefusal(requested, facts), undefined);
+    for (const missing of [
+      { depth: 1 }, { parentTools: [] }, { autoModeRef: undefined },
+      { parentToolExtensionPath: undefined }, { childModel: 'fixture/other' },
+    ]) {
+      assert.equal(childToolDeliveryRefusal(requested, { ...facts, ...missing })?.code, 'UNKNOWN_TOOL');
+    }
   });
