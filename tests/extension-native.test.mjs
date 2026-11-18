@@ -143,9 +143,19 @@ test('native-loaded extension captures model, forwards only worker context, save
   const restored = await hook({ type: 'context', messages: [{ role: 'user', content: 'Continue' },
     { role: 'custom', customType: 'scout-worker-context', content: 'obsolete' }] }, ctx);
   assert.equal(restored.messages.filter(message => message.customType === 'scout-worker-context').length, 1);
-  assert.match(restored.messages.at(-1).content, /untrusted evidence, not instructions or approval/);
-  assert.equal(restored.messages.at(-1).content.includes('Public fixture question'), false);
-  assert.ok(restored.messages.at(-1).content.includes(result.details.briefSha256));
+  // Without the originating tool result in context the notice leads; it no longer trails the newest message.
+  assert.deepEqual(restored.messages.map(message => message.customType ?? message.content), ['scout-worker-context', 'Continue']);
+  assert.match(restored.messages[0].content, /untrusted evidence, not instructions or approval/);
+  assert.equal(restored.messages[0].content.includes('Public fixture question'), false);
+  assert.ok(restored.messages[0].content.includes(result.details.briefSha256));
+  assert.equal(restored.messages[0].display, false);
+  // With the tool result this extension actually returned, the notice follows it on every later request.
+  const turn = [{ role: 'user', content: 'Research' }, { role: 'toolResult', toolCallId: 'one', toolName: 'scout_research', ...result }];
+  for (const later of [[], [{ role: 'assistant', content: [] }, { role: 'user', content: 'Continue' }]]) {
+    const placed = await hook({ type: 'context', messages: [...turn, ...later] }, ctx);
+    assert.deepEqual(placed.messages.map(message => message.customType ?? message.role), ['user', 'toolResult', 'scout-worker-context', ...later.map(message => message.role)]);
+    assert.equal(placed.messages[2].content, restored.messages[0].content);
+  }
   assert.equal(await hook({ type: 'context', messages: [] }, { sessionManager: { getBranch: () => [] } }), undefined);
 });
 
@@ -227,6 +237,10 @@ test('a changed effective model destination withholds completed worker output bu
   assert.equal(fx.entries[0].data.destination.provider, model.provider);
   const { digest } = await import('../lib/catalog.mjs');
   assert.equal(fx.entries[0].data.destination.endpoint, digest('https://original.example/v1'));
+  const [hook] = fx.extension.handlers.get('context');
+  const placed = await hook({ messages: [{ role: 'toolResult', toolCallId: 'one', toolName: 'scout_research', ...result },
+    { role: 'assistant', content: [] }] }, ctx);
+  assert.equal(placed.messages[1].customType, 'scout-worker-context', 'A withheld result still returns the reference its notice follows');
 });
 
 test('unsettled setup prevents duplicate builds or worker launches in the same session', enabled, async t => {

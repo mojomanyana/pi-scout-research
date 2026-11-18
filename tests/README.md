@@ -21,10 +21,13 @@ native integration controls explicitly skip. The separate prefix is not a runtim
 dependency of Scout. CI selects the same direct dependency versions.
 
 The Daddy child-delivery control asks the installed Daddy's own planner rule
-whether `scout_research` can reach a governed child, and expects the refusal the
-README describes. It skips only for a Daddy older than 0.57.0 that does not ship
-that rule. If a later Daddy delivers the tool, the control fails: change it together
-with the README and the `scout-public` skill. It launches no child and no worker.
+whether `scout_research` can reach a governed child. A parent catalog entry alone
+must be refused. If the installed host has the parent-tool proxy, the control also
+checks eligible direct-child delivery and refusal without its required facts or
+with a different model. On a released host without that capability, research stays
+in the parent. Only a Daddy older than 0.57.0 without the child-delivery rule skips
+this control. It launches no child and no worker; full proxy execution belongs to
+Daddy's integration checks.
 
 The approved failure-reporting regression groups cover actionable categories;
 bounded diagnostics without secrets; cleanup, cancellation and owner transitions;
@@ -53,3 +56,9 @@ That check uses the real host validator to verify complete native Scout snapshot
 including long retained failure details; it skips explicitly when no host contract
 is selected. The legacy Daddy renderer remains independently exercised through
 `SCOUT_DADDY_ROOT`.
+
+The reference-notice placement controls use synthetic Pi context messages and the
+natively loaded context handlers. They check that the notice keeps one position
+while later requests grow, stays after all tool results of the turn that saved the
+brief, and otherwise leads the context after summaries. They send no provider
+request and do not measure prompt-cache reads or cost.

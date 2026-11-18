@@ -1,18 +1,25 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-11-18
 
-- Correct the documented pi-daddy integration: `scout_research` runs in the parent
-  Pi session. pi-daddy 0.57.0 and later refuse to launch a governed child that
-  needs it, because governed children load only native Pi tools and Daddy's own
-  entrypoint. Call the tool, or use the `scout-public` skill inline, from the
-  parent or coordinator session and hand the answer and exact brief reference to
-  the delegated role. Research, worker and disclosure behavior is unchanged.
-- Reword the `scout-public` skill for inline use. Its name and its single declared
-  tool are unchanged.
+- Correct the documented pi-daddy integration using actual tool availability.
+  Use `scout-public` inline where `scout_research` is callable, or delegate it when
+  Daddy explicitly offers a supported parent-run tool for that child. On hosts
+  without that route, keep research in the parent and pass the findings and exact
+  brief reference to the delegated role. The session hosting Scout still owns
+  worker execution and cleanup. The skill name, single declared tool, research
+  behavior and disclosure checks are unchanged.
 - Add an offline control that asks the installed Daddy's own child-delivery rule,
-  so these documents and the sibling package cannot silently disagree again. Test
-  dependencies now select pi-daddy 0.59.1.
+  with and without eligible parent-tool facts. The same control supports released
+  hosts without a proxy. Test dependencies select pi-daddy 0.59.1.
+- Keep the saved-reference notice at a stable position in the model request instead
+  of re-appending it after the newest message, so provider prompt caching of earlier
+  conversation is not disturbed on every request. The notice follows the tool
+  results of the turn that saved the brief, or leads the context after summaries
+  when that result is no longer present. Saving a newer brief moves the notice once,
+  to the newer result; until then the inserted message is identical on every
+  request. Its text, the selected reference and all branch, destination and read
+  checks are unchanged. The cost effect has not been measured.
 
 ## 0.3.1 — 2026-11-16
 
