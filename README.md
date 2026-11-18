@@ -31,9 +31,9 @@ export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 
 `PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.3.0 scout-worker-build`, but first-use preparation performs the same work automatically.
 
-Governed children need Scout in their selected resources and permission for `scout_research`; no Docker command or image parameter is supplied by the model. A child Pi with the tool loaded owns its worker lifecycle.
+Scout's `scout_research` tool runs in the parent Pi session where Scout is loaded; no Docker command or image parameter is supplied by the model, and that session owns its worker lifecycle. pi-daddy 0.57.0 and later refuse to launch a governed child whose definition needs `scout_research`, because governed children load only native Pi tools and Daddy's own entrypoint; permission cannot add the tool. Call it from the parent or coordinator session and hand the returned answer and exact brief reference to a delegated role. That child has no Scout tools and cannot resolve the reference itself, so include the findings it needs.
 
-The optional `scout-public` skill supplies a narrow pi-daddy agent definition declaring only `scout_research`. After loading resources, `/grants init` can discover it; approve that capability through the existing operator flow. A Principal coordinator can delegate public research to `scout-public` and give its returned evidence to Investigate, Architect or Decide. Existing Principal definitions keep their current tool restrictions. A role from another skill package can use the same tool or wrapper; no Principal dependency is introduced.
+The optional `scout-public` skill is narrow guidance for that one tool and declares only `scout_research`. Use it inline in the parent session (`/skill:scout-public`), or call the tool directly. Daddy can still parse it as a definition but refuses to launch it as a governed child. A Principal coordinator can run the research itself and give the returned evidence to Investigate, Architect or Decide. Existing Principal definitions keep their current tool restrictions. A coordinator from another skill package can use the same tool or skill; no Principal dependency is introduced.
 
 ## Use with the rest of the ecosystem
 
@@ -56,8 +56,10 @@ silently overriding a gate.
 Harness's optional `jev_advice` may help the parent assess whether that proposed
 lookup is useful when workflow advice is already enabled. It does not select tools
 automatically, supply access, approve a result or replace evidence. The `scout-public`
-wrapper still declares only `scout_research`; it cannot call Bookie or JEV itself.
-Daddy owns actual delegation and cleanup, and Principal (or another role package)
+skill still declares only `scout_research` and adds no Bookie or JEV capability; used
+inline it is guidance and does not restrict the parent session's other tools. Scout
+runs in the parent session and confirms its own worker cleanup. Daddy owns delegation
+and cleanup of the roles that receive the result, and Principal (or another role package)
 owns the product decision. No extra component is required for ordinary Scout use.
 
 ## Modes and limits

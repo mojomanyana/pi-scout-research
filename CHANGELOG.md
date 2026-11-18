@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- Correct the documented pi-daddy integration: `scout_research` runs in the parent
+  Pi session. pi-daddy 0.57.0 and later refuse to launch a governed child that
+  needs it, because governed children load only native Pi tools and Daddy's own
+  entrypoint. Call the tool, or use the `scout-public` skill inline, from the
+  parent or coordinator session and hand the answer and exact brief reference to
+  the delegated role. Research, worker and disclosure behavior is unchanged.
+- Reword the `scout-public` skill for inline use. Its name and its single declared
+  tool are unchanged.
+- Add an offline control that asks the installed Daddy's own child-delivery rule,
+  so these documents and the sibling package cannot silently disagree again. Test
+  dependencies now select pi-daddy 0.59.1.
+
 ## 0.3.1 — 2026-11-16
 
 - Negotiate append-only model context transfers so later research turns do not

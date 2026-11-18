@@ -10,7 +10,7 @@ provider, and do not establish protected online egress or live research quality.
 
 Install direct test dependencies into a separate directory with scripts disabled:
 
-    npm install --prefix /tmp/scout-test-deps --ignore-scripts --no-audit --no-fund --save-exact @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-ai@1.5.2 typebox@1.4.7 pi-daddy@0.57.0
+    npm install --prefix /tmp/scout-test-deps --ignore-scripts --no-audit --no-fund --save-exact @earendil-works/pi-coding-agent@1.5.2 @earendil-works/pi-ai@1.5.2 typebox@1.4.7 pi-daddy@0.59.1
 
 From this repository root:
 
@@ -19,6 +19,12 @@ From this repository root:
 Both environment variables are required to exercise all native controls. Otherwise
 native integration controls explicitly skip. The separate prefix is not a runtime
 dependency of Scout. CI selects the same direct dependency versions.
+
+The Daddy child-delivery control asks the installed Daddy's own planner rule
+whether `scout_research` can reach a governed child, and expects the refusal the
+README describes. It skips only for a Daddy older than 0.57.0 that does not ship
+that rule. If a later Daddy delivers the tool, the control fails: change it together
+with the README and the `scout-public` skill. It launches no child and no worker.
 
 The approved failure-reporting regression groups cover actionable categories;
 bounded diagnostics without secrets; cleanup, cancellation and owner transitions;
