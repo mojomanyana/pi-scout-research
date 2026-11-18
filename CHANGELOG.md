@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.2 — 2026-11-18
 
 - Correct the documented pi-daddy integration using actual tool availability.
   Use `scout-public` inline where `scout_research` is callable, or delegate it when
