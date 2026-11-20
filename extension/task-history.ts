@@ -1,4 +1,4 @@
-// Source: pi-daddy contracts/task-history/v1/producer.ts. SHA-256 02c2eb0b53f66188a54d383a3dc97501438e19060f9a1978363e9221b95c77e3
+// Source: pi-daddy contracts/task-history/v1/producer.ts. SHA-256 9b5a75b83092069e1cbe9b571ddd3c428da805a036811f8dbf30894769e6f005
 /** Optional v1 task-history projection. The execution owner keeps its own receipt. */
 type HistoryOwner = "principal" | "scout" | "harness" | "pi-daddy";
 
@@ -35,12 +35,15 @@ export function bindTaskHistory(bus: EventBus | undefined, owner: HistoryOwner, 
   } finally {
     accepting = false;
   }
-  return (operationId: string, kind: string, state: string, label: string, evidence?: TaskObservation["evidence"]): void => {
+  return async (operationId: string, kind: string, state: string, label: string, evidence?: TaskObservation["evidence"]): Promise<void> => {
     if (ambiguous || !publisher) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      // The projection is asynchronous. It cannot alter an execution, its returned
-      // result or its owner evidence when a consumer is unavailable.
-      void Promise.resolve(publisher({ version: 1, owner, kind, operationId, state, label, ...(evidence ? { evidence } : {}) })).catch(() => {});
+      const write = publisher({ version: 1, owner, kind, operationId, state, label, ...(evidence ? { evidence } : {}) });
+      // The owner keeps its native receipt. A slow optional observer cannot
+      // stall the native operation. A late write remains pinned to its origin.
+      if (write) await Promise.race([write, new Promise<void>(resolve => { timer = setTimeout(resolve, 250); })]);
     } catch { /* A consumer may have revoked its binding. */ }
+    finally { if (timer) clearTimeout(timer); }
   };
 }

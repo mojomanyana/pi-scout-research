@@ -98,11 +98,13 @@ export default function research(pi: ExtensionAPI) {
         const joined = !!work;
         if (!work) {
           work = (async () => {
-            if (admissionUnavailable) throw new Error('Task admission for an external source request is unavailable.');
             let receipt: DispatchReceipt | undefined;
             const dispatch: { cleanup: CleanupState } = { cleanup: 'not-started' };
             try {
+              await record(_id, 'source-fetch', 'observed', 'Approved source fetch requested.');
               signal?.throwIfAborted();
+              assertOwner();
+              if (admissionUnavailable) throw new Error('Task admission for an external source request is unavailable.');
               try { receipt = await admit?.({ operationId: _id }); }
               catch { throw new Error('The task controller declined this fetch. Check task state and remaining allowance in pi-daddy.'); }
               const effective = receipt && signal ? AbortSignal.any([receipt.signal, signal]) : receipt?.signal ?? signal;
@@ -157,7 +159,16 @@ export default function research(pi: ExtensionAPI) {
       const workspace = await workspaceIdentity(ctx.cwd).catch(() => undefined);
       const destination = await destinationIdentity(ctx);
       const brief = validateBrief(args, await catalog(ctx));
-      const saved = await store.save(owner.sessionId, brief);
+      await record(_id, 'local-brief', 'observed', 'Research brief save requested.');
+      let saved: Awaited<ReturnType<typeof store.save>>;
+      try {
+        _signal?.throwIfAborted();
+        if (!owner.current()) throw Error('Research session changed before saving.');
+        saved = await store.save(owner.sessionId, brief);
+      } catch (error) {
+        await record(_id, 'local-brief', _signal?.aborted ? 'cancelled' : 'unconfirmed', 'Research brief retention unconfirmed.');
+        throw error;
+      }
       const retained = { reference: saved.reference, destination, savedAt: new Date().toISOString(), researchStatus: briefOutcome(brief) };
       record(_id, 'local-brief', retained.researchStatus === 'incomplete' ? 'partial' : 'recorded',
         `Local research brief saved with ${brief.findings.length} findings and ${brief.gaps.length} gaps.`, { type: 'brief', id: saved.reference.sha256 });

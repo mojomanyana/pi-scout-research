@@ -50,6 +50,9 @@ export default function scoutWorker(pi: ExtensionAPI) {
       let phase = 'setup';
       busy = true;
       try {
+        await record(_id, 'worker-brief', 'observed', 'Research worker requested.');
+        signal?.throwIfAborted();
+        if (!owner.current()) throw Error('Session changed before worker setup.');
         const workspace = await workspaceIdentity(ctx.cwd).catch(() => undefined);
         observe(ctx, 'running', ['Preparing isolated research worker.']);
         const destination = await destinationIdentity(ctx);
@@ -69,13 +72,14 @@ export default function scoutWorker(pi: ExtensionAPI) {
         if (admit) {
           try { reservation = await admit({ operationId: _id }); }
           catch {
-            record(_id, 'worker-admission', 'refused', 'Task controller refused the research request before worker setup.');
+            await record(_id, 'worker-brief', 'refused', 'Task controller refused the research request before worker setup.');
             return { isError: true, content: [{ type: 'text', text: 'The task controller declined this research request. Inspect the current task, existing attempt and remaining allowance in pi-daddy.' }],
               details: { phase: 'task-admission', workerStarted: false } };
           }
           signal = signal ? AbortSignal.any([signal, reservation.signal]) : reservation.signal;
         }
         signal?.throwIfAborted();
+        if (!owner.current()) throw Error('Session changed before worker setup.');
         cleanup = 'unknown';
         const { image, mode, dockerPath, dockerArgs } = await prepareWorker({ env: configuration, signal,
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: stage === 'building'

@@ -477,7 +477,10 @@ test('attached task checks admission before setup and stores a proven pre-launch
   assert.equal(workers, 0);
   assert.equal(setups, 1);
   assert.deepEqual(receipts, [['attempt-b', 'not-started']]);
-  assert.deepEqual(facts.map(fact => fact.operationId), ['attempt-a', 'attempt-b']);
+  assert.deepEqual(facts.map(fact => [fact.operationId, fact.kind, fact.state]), [
+    ['attempt-a', 'worker-brief', 'observed'], ['attempt-a', 'worker-brief', 'refused'],
+    ['attempt-b', 'worker-brief', 'observed'], ['attempt-b', 'worker-brief', 'failed'],
+  ]);
 });
 
 test('first approved page fetch is admitted once; cached access stays free and stale branches cannot receive results', enabled, async t => {
@@ -522,7 +525,9 @@ test('first approved page fetch is admitted once; cached access stays free and s
   assert.equal((await joined).details.passage, 'bounded fixture passage');
   assert.deepEqual(ids, ['first']);
   assert.equal(fetched, 1);
-  assert.ok(history.some(event => event.kind === 'source-fetch' && event.state === 'recorded'));
+  assert.deepEqual(history.map(event => [event.operationId, event.kind, event.state]), [
+    ['first', 'source-fetch', 'observed'], ['first', 'source-fetch', 'recorded'],
+  ]);
   rejectAdmission = true;
   assert.equal((await run('cached', 'shared')).details.passage, 'bounded fixture passage');
   await assert.rejects(run('no', 'denied'), /controller declined/);
