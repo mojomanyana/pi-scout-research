@@ -32,6 +32,15 @@ Private brief files use content-addressed exclusive creation. Pi tool results re
 
 The worker's Docker log driver is disabled. The private model exchange travels through the attached pipe without a second persistent Docker stdout log. The parent stores the returned answer, sources and brief; it does not save raw worker model contexts as diagnostic output.
 
+A host explicitly configured for Brave fallback can send one original public
+question to the fixed HTTPS Web Search endpoint. It sends the subscription key
+only in a request header and refuses redirects. The worker can request this
+fallback once and cannot supply a URL, query, headers or credentials. Public mode,
+current branch and destination, and the absence of supplied URLs are required.
+The default limit is five discovery leads and 128 KiB of response data within
+eight seconds. Provider errors do not enter diagnostics. Exa and Brave snippets
+cannot substantiate a supported or conflicting brief finding.
+
 The optional terminal inventory has a separate human-only local display grant:
 the trusted current dashboard owner may preview exact references recorded for
 the current canonical workspace, or the active branch with explicit limited

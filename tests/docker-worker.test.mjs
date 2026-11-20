@@ -51,6 +51,7 @@ function fakeDocker(options = {}) {
           if (options.onModelResponse) options.onModelResponse({ frame, emit, finish, child, close, state });
           else setImmediate(() => finish());
         }
+        else if (frame.type === 'discovery_result') { options.onDiscoveryResult?.({ frame, emit, finish }); }
         else if (frame.type === 'model_error') { setImmediate(() => { emit(options.modelErrorFrame ?? { type: 'error', message: frame.message }); queueMicrotask(() => close(1)); }); }
         callback();
       } catch (error) { callback(error); }
@@ -80,6 +81,53 @@ function runOptions(overrides = {}) {
   return { request, image: IMAGE, onModelRequest: async () => ({ role: 'assistant', content: [{ type: 'text', text: 'Synthetic result' }] }),
     limits: { commandMs: 300, wallMs: 2000, drainMs: 50 }, ...overrides };
 }
+
+test('public discovery is negotiated, single-use and cannot carry worker-controlled arguments', async () => {
+  for (const scenario of ['public', 'old-image', 'old-host', 'offline', 'known-url', 'changed-query', 'duplicate']) {
+    let calls = 0;
+    const configured = scenario !== 'old-host';
+    const req = { ...request, mode: scenario === 'offline' ? 'offline' : 'public',
+      ...(scenario === 'known-url' ? { sourceUrls: ['https://docs.example/'] } : {}) };
+    const sendRequest = emit => emit({ type: 'discovery_fallback', ...(scenario === 'changed-query' ? { query: 'private' } : {}) });
+    const fake = fakeDocker({
+      onModelResponse: ({ frame, emit, finish }) => setImmediate(() => {
+        if (scenario === 'old-image') return finish();
+        if (scenario === 'old-host') { assert.equal(frame.discoveryFallback, undefined); return finish(); }
+        sendRequest(emit);
+      }),
+      onDiscoveryResult: ({ frame, emit, finish }) => setImmediate(() => {
+        assert.deepEqual(frame.results, [{ url: 'https://docs.example/' }]);
+        if (scenario === 'duplicate') sendRequest(emit); else finish();
+      }),
+    });
+    const run = fake.run(runOptions({ request: req, ...(configured ? { onDiscoveryFallback: async () => {
+      calls++; return [{ url: 'https://docs.example/' }];
+    } } : {}) }));
+    if (['offline', 'known-url', 'changed-query', 'duplicate'].includes(scenario)) {
+      await assert.rejects(run, error => error.code === 'PROTOCOL' && error.runtime.cleanup.confirmed);
+    } else assert.equal((await run).runtime.cleanup.confirmed, true);
+    assert.equal(calls, ['public', 'duplicate'].includes(scenario) ? 1 : 0, scenario);
+  }
+});
+
+test('cancelling an in-flight public fallback settles its host callback and removes only the owned worker', async () => {
+  const controller = new AbortController();
+  let started, aborted = false;
+  const entered = new Promise(resolve => { started = resolve; });
+  const fake = fakeDocker({ onModelResponse: ({ emit }) => setImmediate(() => emit({ type: 'discovery_fallback' })) });
+  const run = fake.run(runOptions({ request: { ...request, mode: 'public' }, signal: controller.signal,
+    onDiscoveryFallback: signal => new Promise((resolve, reject) => {
+      signal.addEventListener('abort', () => { aborted = true; reject(Error('test cancellation')); }, { once: true });
+      started();
+    }) }));
+  await entered;
+  controller.abort();
+  await assert.rejects(run, error => error.code === 'CANCELLED' && error.runtime.discoveryCallbackSettled &&
+    error.runtime.cleanup.confirmed && error.runtime.modelCallbackSettled);
+  assert.ok(aborted);
+  assert.equal(fake.state.exists, false);
+  assert.ok(!fake.state.frames.some(frame => frame.type === 'discovery_result'));
+});
 
 test('broker transports partial findings and only releases the result after owned cleanup', async () => {
   const fake = fakeDocker(); let calls = 0;

@@ -31,7 +31,7 @@ export PI_SCOUT_DOCKER_PATH='/mnt/c/Program Files/Docker/Docker/resources/bin/do
 export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 ```
 
-`PI_SCOUT_WORKER_MODE=offline` explicitly disables worker web access; public mode is the default. `PI_SCOUT_WORKER_IMAGE=sha256:...` selects an operator-built image and disables automatic image selection; an invalid or missing override is reported, never silently replaced. These settings must be present in Pi's environment. Normal users need none of them. Optional prewarming is available through `npx --yes --package=pi-scout-research@0.3.0 scout-worker-build`, but first-use preparation performs the same work automatically.
+`PI_SCOUT_WORKER_MODE=offline` disables worker web access. Public mode is the default. On the next research request Scout automatically prepares the worker matching the installed package's sources. To prewarm it, run `scout-worker-build` from that same installation. If you set `PI_SCOUT_WORKER_IMAGE=sha256:...`, rebuild from the updated package's Dockerfile and select the new immutable image ID, or unset the override to use automatic preparation. These settings must be present in Pi's environment.
 
 Scout's `scout_research` implementation runs in the Pi session where Scout is loaded; no Docker command or image parameter is supplied by the model, and that session owns its worker lifecycle. A governed child can call it only when Daddy explicitly offers a parent-run tool for that delegation. Daddy's parent-tool proxy runs the real tool in the root session; it does not install Scout in the child. The proxy requires a callable parent tool and a supported host connection, and currently supports a direct child using the root's provider and model. It cannot be passed through another child. Permission alone does not supply a missing tool or proxy.
 
@@ -68,6 +68,17 @@ owns the product decision. No extra component is required for ordinary Scout use
 
 - `public`: standard Docker isolation with outbound networking. Keyless Exa discovery and public HTTPS fetch use the pinned reference engine. No browser login, cookies, remote extraction, JavaScript rendering or additional model summary is configured. Search output is a lead; important claims need an original source.
 - `offline`: Docker networking is disabled. Optional `PI_SCOUT_CATALOG` supplies selected source snapshots. The model connection still runs through the parent, so selected inputs go to its provider. Offline refers to worker web access, not provider confidentiality.
+
+**Optional Brave discovery.** For public questions without supplied URLs, the host
+can make one [Brave Web Search API](https://api-dashboard.search.brave.com/app/documentation/web-search/get-started)
+request if Exa fails or returns no leads. Set `PI_SCOUT_SEARCH_FALLBACK=brave`
+and supply `BRAVE_API_KEY` to the Pi host using your normal secret configuration.
+Brave receives the original public question within its [documented query limits](https://api-dashboard.search.brave.com/api-reference/web/search/get) of 600 characters and 75 words.
+The search may consume your Brave quota. Scope, catalog text, worker-generated
+queries and the model conversation stay outside this request. Five HTTPS leads
+can be returned. The worker must fetch the underlying page to cite a supported
+finding. With supplied URLs, missing configuration, an older host/image or offline
+mode, the fallback is unavailable. The default remains keyless.
 
 Both use an immutable image ID, UID 1000, read-only root, no host mounts or Docker socket, dropped capabilities, no new privileges, 1 GiB RAM without additional container swap, 2 CPUs and 128 PIDs. Two 128 MiB temporary filesystems hold ephemeral work. One worker may run per parent Pi session. A 20-minute process watchdog and bounded transport prevent indefinitely running or unbounded-output workers; no time/token instructions are added to the model prompt. Snapshots total at most 1 MiB, with at most 131,072 characters per source. Large, authenticated or dynamic pages may be unavailable.
 

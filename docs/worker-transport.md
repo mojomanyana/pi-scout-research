@@ -42,3 +42,10 @@ prefill/decode speed or end-to-end elapsed time.
 This transport change does not add automatic retries, extra research runs, model
 calls, context compaction, or a fixed number of subquestions. A partial sourced
 brief remains partial and must be used within its documented gaps.
+
+The optional public discovery fallback is advertised on a successful host model
+response with `discoveryFallback: true`. Older images ignore this field and older
+hosts never send it. After keyless discovery has no leads, a compatible image can
+send one fieldless `discovery_fallback` command. The host runs its own preconfigured
+query and replies with a `discovery_result` containing bounded leads or an empty
+list. No worker text or credentials are part of the command.

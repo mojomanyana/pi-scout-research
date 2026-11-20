@@ -2,7 +2,7 @@ import { Catalog, digest, boundedText } from '../lib/catalog.mjs';
 import { BriefStore, validateBrief, briefOutcome } from '../lib/brief.mjs';
 import { briefValidation, briefCorrection } from '../lib/brief-validation.mjs';
 import { scoutFailure, failureCode, diagnostic } from '../lib/worker-failure.mjs';
-import { publicUrl } from '../lib/public-url.mjs';
+import { publicUrl, discoveryLeads } from '../lib/public-url.mjs';
 export { publicUrl } from '../lib/public-url.mjs';
 
 const string = maxLength => ({ type: 'string', minLength: 1, maxLength });
@@ -12,7 +12,7 @@ const result = value => ({ content: [{ type: 'text', text: JSON.stringify(value)
 const citation = object({ sourceId: { ...string(64), description: 'An ID returned by research_sources or research_fetch.' }, start: { ...integer, description: 'First source line; the inclusive range must contain at most 80 lines.' }, end: integer, quote: { ...string(1000), description: 'An exact substring from these source lines, at most 25 words. Read the source first.' } });
 export const briefSchema = { ...object({ question: string(4000), scope: string(4000), questions: { type: 'array', items: string(1200), maxItems: 12 }, doneWhen: string(4000), findings: { type: 'array', maxItems: 20, items: object({ claim: string(1600), status: { type: 'string', enum: ['supported', 'conflicting', 'unverified'] }, reason: string(1200), citations: { type: 'array', items: citation, maxItems: 4 } }) }, gaps: { type: 'array', items: string(1200), maxItems: 12 } }), description: 'The entire saved brief must fit within 24000 UTF-8 bytes, including resolved citation metadata. Preserve the exact question and scope. Supported/conflicting findings need citations. Use gaps and unverified findings for incomplete research, including findings: [] when no evidence is available.' };
 
-export function createResearch(request, briefRoot) {
+export function createResearch(request, briefRoot, bridge) {
   let catalog = new Catalog({ version: 1, sources: request.sources });
   const sources = new Map(request.sources.map(source => [source.id, source]));
   const store = new BriefStore(briefRoot);
@@ -82,22 +82,35 @@ export function createResearch(request, briefRoot) {
       const source = add({ id: `web-${digest(url).slice(0, 20)}-${sha256.slice(0, 20)}`, title: args.title ?? url.slice(0, 300), locator: url, retrievedAt: new Date().toISOString(), text, sha256 });
       return result({ ...catalog.list().find(row => row.id === source.id), preview: text.slice(0, 8000), trusted: false, redirectDestinationVerified: false });
     }) },
-    { name: 'research_search', label: 'Search public sources', description: 'Search public web sources through keyless Exa. Queries leave this container. Uses no browser, model summary or alternate provider. Results are discovery leads; fetch important original sources before relying on claims.', parameters: object({ query: string(2000) }), reachesTools: ['web_search'], execute: observed('SOURCE_SEARCH_FAILED', async (_id, args, signal, _update, ctx) => {
+    { name: 'research_search', label: 'Search public sources', description: 'Discover public HTTPS pages through Exa. An enabled host may search the original public question with Brave once if Exa yields no leads. Search results are leads; fetch original pages for citations.', parameters: object({ query: string(2000) }), reachesTools: ['web_search'], execute: observed('SOURCE_SEARCH_FAILED', async (_id, args, signal, _update, ctx) => {
       let outcome;
-      try { outcome = await ctx.executeTool('web_search', { query: args.query, provider: 'exa', workflow: 'none', includeContent: false, numResults: 5 }, { signal }); }
-      catch { throw scoutFailure('SOURCE_SEARCH_FAILED'); }
-      if (outcome?.isError) throw scoutFailure('SOURCE_SEARCH_FAILED');
-      const data = outcome?.result?.structuredContent;
-      if (!data || !Array.isArray(data.queries) || !data.queries.length) throw scoutFailure('SOURCE_RESULT_INVALID');
-      let queries;
+      let failed = 'SOURCE_SEARCH_FAILED', provider = 'exa', queryText = args.query, queries = [];
       try {
-        queries = data.queries.map(query => ({ query: query.query, provider: query.provider, answer: query.answer ?? '', error: query.error ? 'Public search failed' : null, results: (query.results ?? []).slice(0, 5).map(item => ({ title: item.title, url: item.url, snippet: item.snippet ?? '' })) }));
-      } catch { throw scoutFailure('SOURCE_RESULT_INVALID'); }
-      if (queries.every(query => query.error)) throw scoutFailure('SOURCE_SEARCH_FAILED');
+        outcome = await ctx.executeTool('web_search', { query: args.query, provider, workflow: 'none', includeContent: false, numResults: 5 }, { signal });
+        if (!outcome?.isError) {
+          failed = 'SOURCE_RESULT_INVALID';
+          queries = outcome.result.structuredContent.queries.slice(0, 5).map(query => ({
+            query: args.query, provider, answer: '', error: query.error ? 'Public search failed' : null,
+            results: discoveryLeads(query.results ?? [], 'snippet'),
+          }));
+          if (queries.length) failed = 'SOURCE_SEARCH_FAILED';
+        }
+      } catch { /* Unsafe provider diagnostics must stay inside the worker. */ }
+      if (!queries.some(query => !query.error && query.results.length)) {
+        signal?.throwIfAborted();
+        if (!bridge?.discoveryAvailable || request.sourceUrls?.length) {
+          if (!queries.length || queries.every(query => query.error)) throw scoutFailure(failed);
+        } else {
+          const results = await bridge.discovery(signal);
+          signal?.throwIfAborted();
+          provider = 'brave'; queryText = request.question;
+          queries = [{ query: queryText, provider, answer: '', error: null, results }];
+        }
+      }
       const text = JSON.stringify(queries, null, 2);
       if (text.length > 131072) throw scoutFailure('SOURCE_LIMIT');
       const sha256 = digest(text);
-      const source = add({ id: `search-${sha256.slice(0, 40)}`, title: `Search: ${args.query}`.slice(0, 300), locator: `search:exa:${args.query}`.slice(0, 2000), retrievedAt: new Date().toISOString(), text, sha256 });
+      const source = add({ id: `search-${sha256.slice(0, 40)}`, title: `Search: ${queryText}`.slice(0, 300), locator: `search:${provider}:${queryText}`.slice(0, 2000), retrievedAt: new Date().toISOString(), text, sha256 });
       return result({ sourceId: source.id, sha256, queries, trusted: false, evidenceKind: 'discovery-results' });
     }) },
   );

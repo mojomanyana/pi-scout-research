@@ -5,8 +5,26 @@ export class ModelBridge {
   #next = 0;
   #closed;
   #acknowledged;
+  #discovery;
+  discoveryAvailable = false;
   failureCode;
   constructor(send) { this.send = send; }
+  discovery(signal) {
+    if (!this.discoveryAvailable || this.#closed || signal?.aborted) return Promise.reject(scoutFailure('SOURCE_SEARCH_FAILED'));
+    this.discoveryAvailable = false;
+    return new Promise((resolve, reject) => {
+      const aborted = () => reject(scoutFailure('SOURCE_SEARCH_FAILED'));
+      // Keep the slot until the reply arrives so a cancelled tool does not
+      // turn its own late response into a protocol error.
+      signal?.addEventListener('abort', aborted, { once: true });
+      this.#discovery = {
+        resolve: results => { signal?.removeEventListener('abort', aborted); resolve(results); },
+        reject: error => { signal?.removeEventListener('abort', aborted); reject(error); },
+      };
+      try { this.send({ type: 'discovery_fallback' }); }
+      catch { this.#discovery.reject(scoutFailure('SOURCE_SEARCH_FAILED')); this.#discovery = undefined; }
+    });
+  }
   request(context, signal) {
     if (this.#closed) return Promise.reject(this.#closed);
     if (signal?.aborted) return Promise.reject(signal.reason ?? Error('Model request cancelled'));
@@ -33,6 +51,14 @@ export class ModelBridge {
     });
   }
   accept(frame) {
+    if (frame?.type === 'discovery_result') {
+      if (!this.#discovery) throw scoutFailure('WORKER_PROTOCOL');
+      const pending = this.#discovery;
+      this.#discovery = undefined;
+      if (Array.isArray(frame.results) && frame.results.length > 0 && frame.results.length <= 5) pending.resolve(frame.results);
+      else pending.reject(scoutFailure('SOURCE_SEARCH_FAILED'));
+      return;
+    }
     if (!frame || !['model_response', 'model_error'].includes(frame.type) || typeof frame.id !== 'string') throw scoutFailure('WORKER_PROTOCOL');
     const pending = this.#pending.get(frame.id);
     if (!pending) throw scoutFailure('WORKER_PROTOCOL');
@@ -41,6 +67,7 @@ export class ModelBridge {
       const error = scoutFailure('WORKER_PROTOCOL'); pending.reject(error); throw error;
     }
     this.#acknowledged = frame.contextAck === frame.id ? { id: frame.id, context: pending.context } : undefined;
+    if (frame.discoveryFallback === true) this.discoveryAvailable = true;
     if (frame.type === 'model_error') { this.failureCode = 'MODEL_REQUEST_FAILED'; pending.reject(scoutFailure(this.failureCode)); return; }
     const message = frame.message;
     if (!message || message.role !== 'assistant' || !Array.isArray(message.content) || !['stop', 'toolUse', 'length', 'error', 'aborted'].includes(message.stopReason)) {
@@ -53,6 +80,8 @@ export class ModelBridge {
   }
   close(error = Error('Host input closed')) {
     this.#closed ??= error;
+    this.#discovery?.reject(error);
+    this.#discovery = undefined;
     for (const pending of this.#pending.values()) pending.reject(this.#closed);
     this.#pending.clear();
   }

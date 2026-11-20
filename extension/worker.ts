@@ -8,6 +8,7 @@ import { destinationIdentity } from '../lib/brief-reference.mjs';
 import { placeReferenceNotice } from '../lib/notice-placement.mjs';
 import { createRequest, validateSources } from '../lib/worker-protocol.mjs';
 import { runScout } from '../lib/docker-worker.mjs';
+import { braveDiscovery } from '../lib/brave-discovery.mjs';
 import { prepareWorker } from '../lib/worker-setup.mjs';
 import { scoutFailure, failureReceipt, failureText } from '../lib/worker-failure.mjs';
 import { usageText } from '../lib/worker-usage.mjs';
@@ -88,6 +89,9 @@ export default function scoutWorker(pi: ExtensionAPI) {
         phase = 'research';
         const completed = await runScout({ request, image, signal,
           dockerPath, dockerArgs,
+          onDiscoveryFallback: destination && braveDiscovery(request, { env: process.env,
+            authorized: async () => owner.current() &&
+              JSON.stringify(await destinationIdentity(ctx)) === JSON.stringify(destination) && owner.current() }),
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: `Scout: ${stage}` }], details: { stage } }),
           onModelRequest: async (context: unknown, modelSignal: AbortSignal) => {
             // Pi resolves the selected provider and credentials in the parent.
@@ -104,7 +108,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
             return message;
           },
         });
-        cleanup = completed.runtime.cleanup?.confirmed === true && completed.runtime.modelCallbackSettled !== false
+        cleanup = completed.runtime.cleanup?.confirmed === true && completed.runtime.modelCallbackSettled !== false && completed.runtime.discoveryCallbackSettled !== false
           ? 'settled' : 'unknown';
         let saved;
         try { saved = await briefs.save(owner.sessionId, completed.result.brief); }
@@ -153,8 +157,8 @@ export default function scoutWorker(pi: ExtensionAPI) {
         const modelUsage = usageText(completed.runtime.usage);
         return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.${modelUsage ? `\n${modelUsage}` : ''}` }], details };
       } catch (error) {
-        if (error?.runtime?.cleanup?.confirmed === true && error.runtime.modelCallbackSettled !== false) cleanup = 'settled';
-        if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false)) {
+        if (error?.runtime?.cleanup?.confirmed === true && error.runtime.modelCallbackSettled !== false && error.runtime.discoveryCallbackSettled !== false) cleanup = 'settled';
+        if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false || error.runtime.discoveryCallbackSettled === false)) {
           cleanupBlocked = true;
         }
         const failure = failureReceipt(error, { requestId, phase, cleanupBlocked });
