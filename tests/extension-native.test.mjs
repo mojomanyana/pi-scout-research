@@ -453,3 +453,99 @@ test('missing, malformed, oversized or invalid worker catalogs fail before setup
   assert.equal(launches, 0);
   assert.equal(fx.entries.length, 5);
 });
+
+test('attached task checks admission before setup and stores a proven pre-launch Docker refusal', enabled, async t => {
+  let setups = 0, workers = 0, allow = false;
+  const receipts = [], facts = [];
+  const fx = await fixture(t, async () => { workers++; }, async () => {
+    setups++;
+    throw Object.assign(new Error('synthetic pre-launch failure'), { code: 'DOCKER_UNAVAILABLE' });
+  });
+  fx.bus.on('pi.task-dispatch.v1.bind', binding => binding.accept(async request => {
+    if (!allow) throw Error('task paused');
+    return { signal: new AbortController().signal, finish: state => receipts.push([request.operationId, state]) };
+  }));
+  fx.bus.on('pi.task-history.v1.bind', binding => binding.accept(fact => facts.push(fact)));
+  const ctx = { cwd: fx.root, model, sessionManager: { getSessionId: () => 'scope', getBranch: () => fx.entries } };
+  const invoke = id => fx.tool.execute(id, { question: 'Synthetic question', scope: 'Synthetic scope' }, new AbortController().signal, undefined, ctx);
+  const refused = await invoke('attempt-a');
+  assert.equal(refused.details.workerStarted, false);
+  assert.equal(setups, 0);
+  allow = true;
+  const failed = await invoke('attempt-b');
+  assert.equal(failed.details.failure.workerStarted, false);
+  assert.equal(workers, 0);
+  assert.equal(setups, 1);
+  assert.deepEqual(receipts, [['attempt-b', 'not-started']]);
+  assert.deepEqual(facts.map(fact => [fact.operationId, fact.kind, fact.state]), [
+    ['attempt-a', 'worker-brief', 'observed'], ['attempt-a', 'worker-brief', 'refused'],
+    ['attempt-b', 'worker-brief', 'observed'], ['attempt-b', 'worker-brief', 'failed'],
+  ]);
+});
+
+test('first approved page fetch is admitted once; cached access stays free and stale branches cannot receive results', enabled, async t => {
+  const fx = await fixture(t, async () => { throw Error('No worker belongs in a profile read'); });
+  const previous = process.env.PI_SCOUT_WEB_PROFILE;
+  const profile = join(fx.root, 'profile.json');
+  await writeFile(profile, JSON.stringify({ version: 1, adapter: 'pi-web-access@0.38.0',
+    sources: ['shared', 'denied', 'switched', 'cancelled'].map(id => ({ id, title: id, url: 'https://example.invalid/' + id })) }));
+  process.env.PI_SCOUT_WEB_PROFILE = profile;
+  t.after(() => { if (previous === undefined) delete process.env.PI_SCOUT_WEB_PROFILE; else process.env.PI_SCOUT_WEB_PROFILE = previous; });
+  const { loadExtensions } = await sdkImport('dist/core/extensions/loader.js');
+  const loaded = await loadExtensions([join(fx.root, 'extension', 'index.ts')], fx.root, fx.bus, fx.runtime);
+  assert.deepEqual(loaded.errors, []);
+  const extension = loaded.extensions[0], read = extension.tools.get('research_read').definition;
+  const ids = [], finished = [], history = [];
+  let rejectAdmission = false, controller, respond;
+  fx.bus.on('pi.task-history.v1.bind', binding => binding.accept(event => history.push(event)));
+  fx.bus.on('pi.task-dispatch.v1.bind', binding => binding.accept(async ({ operationId }) => {
+    ids.push(operationId);
+    if (rejectAdmission) throw Error('task paused');
+    controller = new AbortController();
+    return { signal: controller.signal, finish: state => finished.push(state) };
+  }));
+  let arrived, fetched = 0;
+  const ctx = { cwd: fx.root, sessionManager: { getSessionId: () => 'same-session', getBranch: () => fx.entries },
+    executeTool: async (_tool, { url }, { signal }) => {
+      fetched++;
+      const answer = { result: { structuredContent: { urls: [{ url, content: 'bounded fixture passage', status: 200 }] } } };
+      const pending = new Promise(resolve => { respond = () => resolve(answer); });
+      signal.addEventListener('abort', () => respond(), { once: true });
+      arrived();
+      return pending;
+    } };
+  const run = (id, sourceId) => read.execute(id, { sourceId, start: 1, end: 1 }, undefined, undefined, ctx);
+  const started = () => new Promise(resolve => { arrived = resolve; });
+  let entry = started();
+  const one = run('first', 'shared');
+  await entry;
+  const joined = run('joined', 'shared');
+  respond();
+  assert.equal((await one).details.passage, 'bounded fixture passage');
+  assert.equal((await joined).details.passage, 'bounded fixture passage');
+  assert.deepEqual(ids, ['first']);
+  assert.equal(fetched, 1);
+  assert.deepEqual(history.map(event => [event.operationId, event.kind, event.state]), [
+    ['first', 'source-fetch', 'observed'], ['first', 'source-fetch', 'recorded'],
+  ]);
+  rejectAdmission = true;
+  assert.equal((await run('cached', 'shared')).details.passage, 'bounded fixture passage');
+  await assert.rejects(run('no', 'denied'), /controller declined/);
+  assert.deepEqual(ids, ['first', 'no']);
+  assert.equal(fetched, 1);
+  rejectAdmission = false;
+  entry = started();
+  const old = run('old-branch', 'switched');
+  await entry;
+  for (const handler of extension.handlers.get('session_tree')) await handler({}, ctx);
+  respond();
+  await assert.rejects(old, /branch changed/);
+  assert.equal(fx.entries.some(entry => entry.data.id === 'switched'), false);
+  entry = started();
+  const cancelled = run('cancelled', 'cancelled');
+  await entry;
+  controller.abort(); // simulate the controller canceling this local request
+  await assert.rejects(cancelled);
+  assert.equal(fx.entries.some(entry => entry.data.id === 'cancelled'), false);
+  assert.deepEqual(finished, ['settled', 'settled', 'settled']);
+});
