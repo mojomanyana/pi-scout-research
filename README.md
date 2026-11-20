@@ -4,12 +4,14 @@ Scout provides a portable Pi research skill, source snapshots and private briefs
 
 The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. The connector declares Pi 1.4.0 or later and Node 24 or later. Retained scripted native checks cover exact Pi 1.4.0 and 1.5.2 on Node 24.19.0; they do not qualify every later Pi version or live model quality. The worker pins Pi 1.4.0, Node 24.19.0 and pi-web-access 0.38.0.
 
+To set up all five packages and resume a task across Pi sessions, follow the [Pi ecosystem quickstart](https://github.com/mojomanyana/pi-daddy#start-here).
+
 ## Use from Pi
 
 With Pi and Docker running on the same computer, install Scout:
 
 ```bash
-pi install npm:pi-scout-research@0.3.0
+pi install npm:pi-scout-research
 ```
 
 Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
