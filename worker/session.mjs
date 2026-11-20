@@ -40,7 +40,7 @@ export async function runResearch(request, bridge, { cwd = '/workspace', signal 
       if (!['web_search', 'fetch_content'].every(name => names.includes(name))) throw scoutFailure('ENGINE_UNAVAILABLE');
     }
     const skill = await readFile(join(dirname(fileURLToPath(import.meta.url)), '../research/SKILL.md'), 'utf8');
-    research = createResearch(request, briefRoot); await research.initialize();
+    research = createResearch(request, briefRoot, bridge); await research.initialize();
     const resourceLoader = {
       getExtensions: () => resource, getSkills: () => ({ skills: [], diagnostics: [] }),
       getPrompts: () => ({ prompts: [], diagnostics: [] }), getThemes: () => ({ themes: [], diagnostics: [] }),

@@ -67,6 +67,38 @@ test('Scout extension loads through the selected native Pi SDK and exposes quest
   assert.equal(extension.handlers.get('context').length, 1);
 });
 
+test('native public discovery uses the host secret and rechecks the initiating destination before a request', enabled, async t => {
+  const url = 'https://docs.example/';
+  let mode, calls = 0, selectedEndpoint = 'https://model.example/';
+  t.mock.method(globalThis, 'fetch', async (endpoint, options) => {
+    calls++; assert.equal(endpoint.origin, 'https://api.search.brave.com');
+    assert.equal(options.headers['X-Subscription-Token'], 'fixture-only-discovery-key');
+    return Response.json({ web: { results: [{ title: 'Fixture', url, description: 'Discovery only' }] } });
+  });
+  const fx = await fixture(t, async options => {
+    assert.doesNotMatch(JSON.stringify(options.request), /fixture-only-discovery-key/);
+    if (mode === 'unknown') assert.ok(!options.onDiscoveryFallback);
+    else if (mode === 'changed') {
+      selectedEndpoint = 'https://changed.example/';
+      await assert.rejects(options.onDiscoveryFallback(options.signal), { code: 'SOURCE_SEARCH_FAILED' });
+    } else {
+      assert.deepEqual(await options.onDiscoveryFallback(options.signal), [{ title: 'Fixture', url, snippet: 'Discovery only' }]);
+    }
+    return { result: { status: 'incomplete', brief: { question: options.request.question, scope: options.request.scope,
+      questions: [], doneWhen: 'Read source', findings: [], gaps: ['Original not fetched'] } },
+      runtime: { cleanup: { confirmed: true }, modelCallbackSettled: true } };
+  }, undefined, { PI_SCOUT_WORKER_MODE: 'public', PI_SCOUT_SEARCH_FALLBACK: 'brave', BRAVE_API_KEY: 'fixture-only-discovery-key' });
+  const ctx = { model, modelRegistry: { getApiKeyAndHeaders: async () => mode === 'unknown' ? { ok: false } : { ok: true, baseUrl: selectedEndpoint } },
+    sessionManager: { getSessionId: () => 'fixture-session', getBranch: () => fx.entries } };
+  for (mode of ['available', 'changed', 'unknown']) {
+    const result = await fx.tool.execute(mode, { question: 'Public question?', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
+    if (mode === 'changed') assert.equal(result.details.outputWithheld, true);
+    else assert.equal(result.details.researchStatus, 'incomplete');
+    assert.equal(calls, 1);
+    assert.doesNotMatch(JSON.stringify(result), /fixture-only-discovery-key/);
+  }
+});
+
 test('selected Pi chat catalog metadata is accepted without credential-bearing fields', enabled, async () => {
   const require = createRequire(join(sdk, 'package.json'));
   const packagePath = require.resolve.paths('@earendil-works/pi-ai').map(base => join(base, '@earendil-works/pi-ai/package.json')).find(existsSync);
