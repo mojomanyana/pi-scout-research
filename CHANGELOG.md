@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0 — 2026-11-20
+
+- Associate new worker research and source fetches with the task that started them when a compatible controller is available. A pause can decline new work, and cancellation records the extent of cleanup. Reads of cached passages remain available.
+- Preserve the originating session and branch across asynchronous work. A late result from a previous branch cannot silently become a finding in the newly selected branch. A confirmed Docker setup refusal before launch records that no worker started.
+- Publish scoped research observations for optional task history. The native Scout brief retains its findings, citations and gaps. Scout continues to work independently of Bookie and pi-daddy.
+
 ## 0.3.2 — 2026-11-18
 
 - Correct the documented pi-daddy integration using actual tool availability.
