@@ -12,6 +12,8 @@ import { prepareWorker } from '../lib/worker-setup.mjs';
 import { scoutFailure, failureReceipt, failureText } from '../lib/worker-failure.mjs';
 import { usageText } from '../lib/worker-usage.mjs';
 import { scoutStatus } from './status.ts';
+import { bindTaskDispatch, finishTaskDispatch, type CleanupState, type DispatchReceipt } from './task-dispatch.ts';
+import { bindTaskHistory } from './task-history.ts';
 import { scoutOwner } from './owner.ts';
 import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
 
@@ -40,6 +42,10 @@ export default function scoutWorker(pi: ExtensionAPI) {
       const selectedModel = ctx.model;
       const thinking = pi.getThinkingLevel();
       const owner = captureOwner(ctx);
+      const record = bindTaskHistory(pi.events, 'scout', ctx);
+      const admit = bindTaskDispatch(pi.events, 'scout', ctx);
+      let reservation: DispatchReceipt | undefined;
+      let cleanup: CleanupState = 'not-started';
       let requestId: string | undefined;
       let phase = 'setup';
       busy = true;
@@ -60,6 +66,17 @@ export default function scoutWorker(pi: ExtensionAPI) {
         const request = createRequest({ ...args, mode: configuration.PI_SCOUT_WORKER_MODE ?? 'public', sources, model: selectedModel,
           thinkingLevel: thinking });
         requestId = request.requestId;
+        if (admit) {
+          try { reservation = await admit({ operationId: _id }); }
+          catch {
+            record(_id, 'worker-admission', 'refused', 'Task controller refused the research request before worker setup.');
+            return { isError: true, content: [{ type: 'text', text: 'The task controller declined this research request. Inspect the current task, existing attempt and remaining allowance in pi-daddy.' }],
+              details: { phase: 'task-admission', workerStarted: false } };
+          }
+          signal = signal ? AbortSignal.any([signal, reservation.signal]) : reservation.signal;
+        }
+        signal?.throwIfAborted();
+        cleanup = 'unknown';
         const { image, mode, dockerPath, dockerArgs } = await prepareWorker({ env: configuration, signal,
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: stage === 'building'
             ? 'Scout: preparing the research worker for first use. This can take a few minutes.' : `Scout: ${stage}` }], details: { stage } }),
@@ -83,14 +100,18 @@ export default function scoutWorker(pi: ExtensionAPI) {
             return message;
           },
         });
+        cleanup = completed.runtime.cleanup?.confirmed === true && completed.runtime.modelCallbackSettled !== false
+          ? 'settled' : 'unknown';
         let saved;
         try { saved = await briefs.save(owner.sessionId, completed.result.brief); }
         catch { throw Object.assign(scoutFailure('BRIEF_STORAGE_FAILED'), { runtime: completed.runtime }); }
+        const incomplete = completed.result.status === 'incomplete';
+        record(_id, 'worker-brief', incomplete ? 'partial' : completed.result.status === 'complete' ? 'recorded' : 'unconfirmed',
+          `Worker research brief saved with ${completed.result.brief.findings.length} findings and ${completed.result.brief.gaps.length} gaps.`, { type: 'brief', id: saved.reference.sha256 });
         // Preserve the pre-append destination/owner fence, then recheck after optional indexing.
         await destinationIdentity(ctx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
-        const incomplete = completed.result.status === 'incomplete';
         const retained = { requestId: request.requestId,
           reference: saved.reference, destination, image, mode,
           savedAt: new Date().toISOString(),
@@ -128,17 +149,25 @@ export default function scoutWorker(pi: ExtensionAPI) {
         const modelUsage = usageText(completed.runtime.usage);
         return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.${modelUsage ? `\n${modelUsage}` : ''}` }], details };
       } catch (error) {
+        if (error?.runtime?.cleanup?.confirmed === true && error.runtime.modelCallbackSettled !== false) cleanup = 'settled';
         if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false)) {
           cleanupBlocked = true;
         }
-        if (!owner.current()) return { isError: true, content: [{ type: 'text', text: 'Scout failed for the previous session branch. Its diagnostic is withheld from the new branch.' }], details: { outputWithheld: true, reason: 'owner-changed' } };
         const failure = failureReceipt(error, { requestId, phase, cleanupBlocked });
+        if (failure.workerStarted === false) cleanup = 'not-started';
+        // Failure receipts stay native to Scout. The shared view receives bounded status only.
+        record(_id, 'worker-brief', cleanupBlocked ? 'unconfirmed' : 'failed',
+          cleanupBlocked ? 'Worker research failed with cleanup unconfirmed.' : 'Worker research did not deliver a brief.');
+        if (!owner.current()) return { isError: true, content: [{ type: 'text', text: 'Scout failed for the previous session branch. Its diagnostic is withheld from the new branch.' }], details: { outputWithheld: true, reason: 'owner-changed' } };
         let retained = false;
         try { pi.appendEntry('scout-worker-failure-v1', failure); retained = true; }
         catch { /* A session-write error must not hide the original failure. */ }
         observe(ctx, cleanupBlocked ? 'unknown' : 'failed', [failure.summary, failure.nextStep]);
         return { isError: true, content: [{ type: 'text', text: `${failureText(failure)}\nFailure record: ${retained ? 'saved in this Pi session' : 'not saved; retain this tool result'}.` }], details: { failure, retained } };
-      } finally { busy = false; if (owner.current()) observe.sync(); }
+      } finally {
+        try { await finishTaskDispatch(reservation, cleanup); }
+        finally { busy = false; if (owner.current()) observe.sync(); }
+      }
     },
   });
   pi.on('context', async (event, ctx) =>

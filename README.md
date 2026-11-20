@@ -140,6 +140,8 @@ If the session changes before failure, diagnostics are withheld from the new bra
 
 `/skill:research` works without Docker using available Pi research tools. Installing the package alone does not isolate host tools. The `scout_research` tool always uses its Docker worker and prepares it automatically; Docker errors do not silently enable host web access.
 
+When pi-daddy manages a task, starting the worker or fetching an uncached approved web page uses its shared admission and cancellation controls. A read of saved source lines needs no new allowance. Simultaneous requests for the same page on one branch share one fetch; a late result cannot add that page to another branch. A saved brief retains its own hash and coverage under the originating task.
+
 The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.3.0 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
 
 ```json

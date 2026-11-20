@@ -6,6 +6,6 @@ export function scoutOwner(pi: ExtensionAPI) {
     pi.on(event, () => { epoch++; });
   return (ctx: ExtensionContext) => {
     const sessionId = ctx.sessionManager.getSessionId(), observed = epoch;
-    return { sessionId, current: () => epoch === observed && ctx.sessionManager.getSessionId() === sessionId };
+    return { sessionId, generation: observed, current: () => epoch === observed && ctx.sessionManager.getSessionId() === sessionId };
   };
 }
