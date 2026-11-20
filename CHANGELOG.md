@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-11-20
+
+- Scout uses supplied public pages directly and keeps Exa as its default discovery service. Hosts can opt into a Brave fallback when Exa produces no usable HTTPS leads. The subscription key stays on the host.
+- A supported public finding now needs evidence from a fetched page. When discovery produces only snippets, the brief can retain the leads and explain which evidence is missing.
+- Public documentation links to sections of the same page now share one fetch.
+
 ## 0.4.0 — 2026-11-20
 
 - Associate new worker research and source fetches with the task that started them when a compatible controller is available. A pause can decline new work, and cancellation records the extent of cleanup. Reads of cached passages remain available.
