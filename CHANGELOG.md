@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Requests with supplied URLs use a shared six-call research budget. Repeated reads reuse exact passages, and unavailable pages or conflicting findings leave the brief incomplete.
+
 - Public discovery uses Brave first when the host has a key. Keyless discovery, direct URLs, offline mode and the explicitly configured Exa-first fallback remain available.
 
 ## 0.5.0 — 2026-11-20
