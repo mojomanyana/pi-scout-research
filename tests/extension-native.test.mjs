@@ -77,6 +77,7 @@ test('native public discovery uses the host secret and rechecks the initiating d
   });
   const fx = await fixture(t, async options => {
     assert.doesNotMatch(JSON.stringify(options.request), /fixture-only-discovery-key/);
+    assert.equal(options.discoveryOrder, 'first');
     if (mode === 'unknown') assert.ok(!options.onDiscoveryFallback);
     else if (mode === 'changed') {
       selectedEndpoint = 'https://changed.example/';
@@ -87,7 +88,7 @@ test('native public discovery uses the host secret and rechecks the initiating d
     return { result: { status: 'incomplete', brief: { question: options.request.question, scope: options.request.scope,
       questions: [], doneWhen: 'Read source', findings: [], gaps: ['Original not fetched'] } },
       runtime: { cleanup: { confirmed: true }, modelCallbackSettled: true } };
-  }, undefined, { PI_SCOUT_WORKER_MODE: 'public', PI_SCOUT_SEARCH_FALLBACK: 'brave', BRAVE_API_KEY: 'fixture-only-discovery-key' });
+  }, undefined, { PI_SCOUT_WORKER_MODE: 'public', BRAVE_API_KEY: 'fixture-only-discovery-key' });
   const ctx = { model, modelRegistry: { getApiKeyAndHeaders: async () => mode === 'unknown' ? { ok: false } : { ok: true, baseUrl: selectedEndpoint } },
     sessionManager: { getSessionId: () => 'fixture-session', getBranch: () => fx.entries } };
   for (mode of ['available', 'changed', 'unknown']) {

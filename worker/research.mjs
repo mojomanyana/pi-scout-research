@@ -82,29 +82,42 @@ export function createResearch(request, briefRoot, bridge) {
       const source = add({ id: `web-${digest(url).slice(0, 20)}-${sha256.slice(0, 20)}`, title: args.title ?? url.slice(0, 300), locator: url, retrievedAt: new Date().toISOString(), text, sha256 });
       return result({ ...catalog.list().find(row => row.id === source.id), preview: text.slice(0, 8000), trusted: false, redirectDestinationVerified: false });
     }) },
-    { name: 'research_search', label: 'Search public sources', description: 'Discover public HTTPS pages through Exa. An enabled host may search the original public question with Brave once if Exa yields no leads. Search results are leads; fetch original pages for citations.', parameters: object({ query: string(2000) }), reachesTools: ['web_search'], execute: observed('SOURCE_SEARCH_FAILED', async (_id, args, signal, _update, ctx) => {
+    { name: 'research_search', label: 'Search public sources', description: 'Discover public HTTPS pages using the configured search order. A configured host can search the original question once with Brave. Fetch original pages for citations.', parameters: object({ query: string(2000) }), reachesTools: ['web_search'], execute: observed('SOURCE_SEARCH_FAILED', async (_id, args, signal, _update, ctx) => {
       let outcome;
       let failed = 'SOURCE_SEARCH_FAILED', provider = 'exa', queryText = args.query, queries = [];
-      try {
-        outcome = await ctx.executeTool('web_search', { query: args.query, provider, workflow: 'none', includeContent: false, numResults: 5 }, { signal });
-        if (!outcome?.isError) {
-          failed = 'SOURCE_RESULT_INVALID';
-          queries = outcome.result.structuredContent.queries.slice(0, 5).map(query => ({
-            query: args.query, provider, answer: '', error: query.error ? 'Public search failed' : null,
-            results: discoveryLeads(query.results ?? [], 'snippet'),
-          }));
-          if (queries.length) failed = 'SOURCE_SEARCH_FAILED';
-        }
-      } catch { /* Unsafe provider diagnostics must stay inside the worker. */ }
+      const canUseBrave = bridge?.discoveryAvailable && !request.sourceUrls?.length;
+      const first = canUseBrave && bridge.discoveryFirst;
+      async function searchBrave() {
+        const results = await bridge.discovery(signal);
+        signal?.throwIfAborted();
+        provider = 'brave';
+        queryText = request.question;
+        queries = [{ query: queryText, provider, answer: '', error: null, results }];
+      }
+      signal?.throwIfAborted();
+      if (first) {
+        try { await searchBrave(); } catch { signal?.throwIfAborted(); }
+      }
+      async function searchExa() {
+        try {
+          outcome = await ctx.executeTool('web_search', { query: args.query, provider, workflow: 'none', includeContent: false, numResults: 5 }, { signal });
+          if (!outcome?.isError) {
+            failed = 'SOURCE_RESULT_INVALID';
+            queries = outcome.result.structuredContent.queries.slice(0, 5).map(query => ({
+              query: args.query, provider, answer: '', error: query.error ? 'Public search failed' : null,
+              results: discoveryLeads(query.results ?? [], 'snippet'),
+            }));
+            if (queries.length) failed = 'SOURCE_SEARCH_FAILED';
+          }
+        } catch { /* Unsafe provider diagnostics must stay inside the worker. */ }
+      }
+      if (!queries.length) await searchExa();
       if (!queries.some(query => !query.error && query.results.length)) {
         signal?.throwIfAborted();
-        if (!bridge?.discoveryAvailable || request.sourceUrls?.length) {
+        if (!canUseBrave || first) {
           if (!queries.length || queries.every(query => query.error)) throw scoutFailure(failed);
         } else {
-          const results = await bridge.discovery(signal);
-          signal?.throwIfAborted();
-          provider = 'brave'; queryText = request.question;
-          queries = [{ query: queryText, provider, answer: '', error: null, results }];
+          await searchBrave();
         }
       }
       const text = JSON.stringify(queries, null, 2);

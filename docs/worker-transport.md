@@ -43,9 +43,12 @@ This transport change does not add automatic retries, extra research runs, model
 calls, context compaction, or a fixed number of subquestions. A partial sourced
 brief remains partial and must be used within its documented gaps.
 
-The optional public discovery fallback is advertised on a successful host model
+The optional public discovery capability is advertised on a successful host model
 response with `discoveryFallback: true`. Older images ignore this field and older
-hosts never send it. After keyless discovery has no leads, a compatible image can
+hosts before Brave support never send it. When Brave is preferred, the host also
+sends `discoveryFirst: true`. A compatible image requests Brave before keyless
+discovery. Without that preference, it uses Brave only after keyless discovery
+has no leads. In either case it can
 send one fieldless `discovery_fallback` command. The host runs its own preconfigured
 query and replies with a `discovery_result` containing bounded leads or an empty
 list. No worker text or credentials are part of the command.

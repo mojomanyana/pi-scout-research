@@ -83,7 +83,7 @@ function runOptions(overrides = {}) {
 }
 
 test('public discovery is negotiated, single-use and cannot carry worker-controlled arguments', async () => {
-  for (const scenario of ['public', 'old-image', 'old-host', 'offline', 'known-url', 'changed-query', 'duplicate']) {
+  for (const scenario of ['public', 'preferred', 'old-image', 'old-host', 'offline', 'known-url', 'changed-query', 'duplicate']) {
     let calls = 0;
     const configured = scenario !== 'old-host';
     const req = { ...request, mode: scenario === 'offline' ? 'offline' : 'public',
@@ -91,6 +91,7 @@ test('public discovery is negotiated, single-use and cannot carry worker-control
     const sendRequest = emit => emit({ type: 'discovery_fallback', ...(scenario === 'changed-query' ? { query: 'private' } : {}) });
     const fake = fakeDocker({
       onModelResponse: ({ frame, emit, finish }) => setImmediate(() => {
+        assert.equal(frame.discoveryFirst, scenario === 'preferred' ? true : undefined);
         if (scenario === 'old-image') return finish();
         if (scenario === 'old-host') { assert.equal(frame.discoveryFallback, undefined); return finish(); }
         sendRequest(emit);
@@ -100,13 +101,13 @@ test('public discovery is negotiated, single-use and cannot carry worker-control
         if (scenario === 'duplicate') sendRequest(emit); else finish();
       }),
     });
-    const run = fake.run(runOptions({ request: req, ...(configured ? { onDiscoveryFallback: async () => {
+    const run = fake.run(runOptions({ request: req, discoveryOrder: scenario === 'preferred' ? 'first' : 'fallback', ...(configured ? { onDiscoveryFallback: async () => {
       calls++; return [{ url: 'https://docs.example/' }];
     } } : {}) }));
     if (['offline', 'known-url', 'changed-query', 'duplicate'].includes(scenario)) {
       await assert.rejects(run, error => error.code === 'PROTOCOL' && error.runtime.cleanup.confirmed);
     } else assert.equal((await run).runtime.cleanup.confirmed, true);
-    assert.equal(calls, ['public', 'duplicate'].includes(scenario) ? 1 : 0, scenario);
+    assert.equal(calls, ['public', 'preferred', 'duplicate'].includes(scenario) ? 1 : 0, scenario);
   }
 });
 
