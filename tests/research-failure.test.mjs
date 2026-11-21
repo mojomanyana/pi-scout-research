@@ -111,7 +111,7 @@ async function sessionFixture(t, scenario) {
   await writeFile(join(root, 'research', 'SKILL.md'), 'Synthetic offline session fixture.');
   let source = await readFile(new URL('../worker/session.mjs', import.meta.url), 'utf8');
   source = source.replaceAll("'@earendil-works/pi-coding-agent'", "'./sdk.mjs'").replaceAll("'@earendil-works/pi-ai'", "'./sdk.mjs'");
-  for (const relative of ['./bridge.mjs', './research.mjs', '../lib/worker-failure.mjs']) {
+  for (const relative of ['./bridge.mjs', './research.mjs', '../lib/worker-failure.mjs', '../lib/supplied-passages.mjs']) {
     const actual = new URL(relative, new URL('../worker/session.mjs', import.meta.url)).href;
     source = source.replaceAll(`'${relative}'`, JSON.stringify(actual));
   }

@@ -7,6 +7,7 @@ export class ModelBridge {
   #acknowledged;
   #discovery;
   discoveryAvailable = false;
+  discoveryFirst = false;
   failureCode;
   constructor(send) { this.send = send; }
   discovery(signal) {
@@ -67,7 +68,10 @@ export class ModelBridge {
       const error = scoutFailure('WORKER_PROTOCOL'); pending.reject(error); throw error;
     }
     this.#acknowledged = frame.contextAck === frame.id ? { id: frame.id, context: pending.context } : undefined;
-    if (frame.discoveryFallback === true) this.discoveryAvailable = true;
+    if (frame.discoveryFallback === true) {
+      this.discoveryAvailable = true;
+      this.discoveryFirst = frame.discoveryFirst === true;
+    }
     if (frame.type === 'model_error') { this.failureCode = 'MODEL_REQUEST_FAILED'; pending.reject(scoutFailure(this.failureCode)); return; }
     const message = frame.message;
     if (!message || message.role !== 'assistant' || !Array.isArray(message.content) || !['stop', 'toolUse', 'length', 'error', 'aborted'].includes(message.stopReason)) {

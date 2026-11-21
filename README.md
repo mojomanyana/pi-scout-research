@@ -20,7 +20,7 @@ The first preparation downloads the pinned Node/Pi/web runtime and npm dependenc
 
 Choose your normal Pi model. Ask, for example: “Use Scout to compare the current Node.js support policies for these two public libraries. Give me the relevant sources and uncertainty.” No special skill sequence is required. Scout captures the parent's selected model and thinking level at dispatch. Each model turn uses Pi's native provider/authentication support in the parent and consumes its normal usage allowance. Credentials stay outside the container.
 
-The tool accepts `question`, `scope` and optional `sourceUrls`. Send public material only. If you already know the relevant official documentation pages, provide up to six unique HTTPS URLs (each at most 2,000 characters after URL encoding, without credentials, spaces, control characters or fragments). In public mode, the worker can fetch those pages directly; search is not required first. URLs are starting points, not an endorsement of their publisher or contents. Offline mode does not accept public source URLs or fetch them.
+The tool accepts `question`, `scope` and optional `sourceUrls`. Send public material only. If you already know the relevant official documentation pages, provide up to six unique HTTPS URLs (each at most 2,000 characters after URL encoding, without credentials, spaces, control characters or fragments). With supplied URLs, the current worker limits research to those pages and the supplied catalog. It reads each applicable URL once, selects exact passages from up to 2 MiB of returned text per page, and shares a six-model-call budget across the request. Citation line numbers are local to the retained passage. The saved brief records unread pages and explicit release mismatches. For open-ended discovery, omit the URL list. A supplied URL does not verify publisher identity. Offline mode does not accept public source URLs or fetch them.
 
 Scout saves a private brief under `~/.pi-scout-research/briefs/` and returns its saved path, exact reference and cleanup confirmation. A returned result may be complete or incomplete: retained partial findings and gaps remain useful without claiming the research question was answered. `PI_SCOUT_BRIEFS` can select another operator-owned root. Current-branch references are restored into Pi context after reload or compaction; brief bodies are retrieved only when needed. Notes from abandoned branches are not selected. Briefs are evidence, not approval or training labels.
 
@@ -69,16 +69,19 @@ owns the product decision. No extra component is required for ordinary Scout use
 - `public`: standard Docker isolation with outbound networking. Keyless Exa discovery and public HTTPS fetch use the pinned reference engine. No browser login, cookies, remote extraction, JavaScript rendering or additional model summary is configured. Search output is a lead; important claims need an original source.
 - `offline`: Docker networking is disabled. Optional `PI_SCOUT_CATALOG` supplies selected source snapshots. The model connection still runs through the parent, so selected inputs go to its provider. Offline refers to worker web access, not provider confidentiality.
 
-**Optional Brave discovery.** For public questions without supplied URLs, the host
-can make one [Brave Web Search API](https://api-dashboard.search.brave.com/app/documentation/web-search/get-started)
-request if Exa fails or returns no leads. Set `PI_SCOUT_SEARCH_FALLBACK=brave`
-and supply `BRAVE_API_KEY` to the Pi host using your normal secret configuration.
+**Public search.** Set `BRAVE_API_KEY` on the Pi host to use Brave first for the
+original public question. A supplied URL goes directly to fetch. Without a usable
+key or eligible question, discovery uses keyless Exa. Exa can also supply leads
+if Brave is unavailable. Use `PI_SCOUT_SEARCH_PROVIDER=exa` for Exa only.
+The existing `PI_SCOUT_SEARCH_FALLBACK=brave` setting keeps Exa first and Brave
+as fallback. Set `PI_SCOUT_SEARCH_PROVIDER=brave` to override that older setting.
 Brave receives the original public question within its [documented query limits](https://api-dashboard.search.brave.com/api-reference/web/search/get) of 600 characters and 75 words.
 The search may consume your Brave quota. Scope, catalog text, worker-generated
 queries and the model conversation stay outside this request. Five HTTPS leads
 can be returned. The worker must fetch the underlying page to cite a supported
-finding. With supplied URLs, missing configuration, an older host/image or offline
-mode, the fallback is unavailable. The default remains keyless.
+finding. Each research request can make at most one Brave call. Offline work never
+uses public discovery. Brave-first requires an updated host package and worker
+image. An earlier compatible worker/host pair retains its previous search order.
 
 Both use an immutable image ID, UID 1000, read-only root, no host mounts or Docker socket, dropped capabilities, no new privileges, 1 GiB RAM without additional container swap, 2 CPUs and 128 PIDs. Two 128 MiB temporary filesystems hold ephemeral work. One worker may run per parent Pi session. A 20-minute process watchdog and bounded transport prevent indefinitely running or unbounded-output workers; no time/token instructions are added to the model prompt. Snapshots total at most 1 MiB, with at most 131,072 characters per source. Large, authenticated or dynamic pages may be unavailable.
 

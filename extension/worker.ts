@@ -8,7 +8,7 @@ import { destinationIdentity } from '../lib/brief-reference.mjs';
 import { placeReferenceNotice } from '../lib/notice-placement.mjs';
 import { createRequest, validateSources } from '../lib/worker-protocol.mjs';
 import { runScout } from '../lib/docker-worker.mjs';
-import { braveDiscovery } from '../lib/brave-discovery.mjs';
+import { braveDiscovery, braveOrder } from '../lib/brave-discovery.mjs';
 import { prepareWorker } from '../lib/worker-setup.mjs';
 import { scoutFailure, failureReceipt, failureText } from '../lib/worker-failure.mjs';
 import { usageText } from '../lib/worker-usage.mjs';
@@ -89,6 +89,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         phase = 'research';
         const completed = await runScout({ request, image, signal,
           dockerPath, dockerArgs,
+          discoveryOrder: braveOrder(process.env),
           onDiscoveryFallback: destination && braveDiscovery(request, { env: process.env,
             authorized: async () => owner.current() &&
               JSON.stringify(await destinationIdentity(ctx)) === JSON.stringify(destination) && owner.current() }),

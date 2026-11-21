@@ -1,6 +1,6 @@
 {
   "name": "pi-scout-research",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Portable evidence-led research with private, branch-aware briefs for Pi",
   "type": "module",
   "license": "MIT",

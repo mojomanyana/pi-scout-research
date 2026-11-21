@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 — 2026-11-21
+
+- Requests with supplied URLs use a shared six-call research budget. Repeated reads reuse exact passages, and unavailable pages or conflicting findings leave the brief incomplete.
+
+- Public discovery uses Brave first when the host has a key. Keyless discovery, direct URLs, offline mode and the explicitly configured Exa-first fallback remain available.
+
 ## 0.5.0 — 2026-11-20
 
 - Scout uses supplied public pages directly and keeps Exa as its default discovery service. Hosts can opt into a Brave fallback when Exa produces no usable HTTPS leads. The subscription key stays on the host.

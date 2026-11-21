@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { braveDiscovery, dockerEnvironment } from '../lib/brave-discovery.mjs';
+import { braveDiscovery, braveOrder, dockerEnvironment } from '../lib/brave-discovery.mjs';
 import { createResearch } from '../worker/research.mjs';
 import { ModelBridge } from '../worker/bridge.mjs';
 
@@ -34,12 +34,17 @@ test('discovery uses the exact authorized question at the fixed origin once and 
   assert.equal(calls, 1); assert.equal(authorizations, 2);
 });
 
-test('offline, omitted opt-in, known URLs, unsuitable questions and absent key do not enable a fallback', () => {
+test('Brave is preferred with a key; offline, known URLs, unsuitable questions and absent key withhold it', () => {
+  assert.equal(braveOrder({}), 'first');
+  assert.equal(braveOrder(env), 'fallback');
+  assert.equal(braveOrder({ ...env, PI_SCOUT_SEARCH_PROVIDER: 'brave' }), 'first');
+  assert.equal(typeof braveDiscovery(request, { env: { BRAVE_API_KEY: env.BRAVE_API_KEY } }), 'function');
   assert.deepEqual(dockerEnvironment({ BRAVE_API_KEY: env.BRAVE_API_KEY, Brave_Api_Key: 'redact', PATH: '/usr/bin' }), { PATH: '/usr/bin' });
   for (const [req, configuration] of [
     [{ ...request, mode: 'offline' }, env], [{ ...request, sourceUrls: [url] }, env],
     [{ ...request, question: 'x'.repeat(601) }, env], [{ ...request, question: 'term '.repeat(76) }, env],
-    [request, { BRAVE_API_KEY: env.BRAVE_API_KEY }], [request, { PI_SCOUT_SEARCH_FALLBACK: 'brave' }],
+    [request, { ...env, PI_SCOUT_SEARCH_PROVIDER: 'exa' }], [request, { ...env, PI_SCOUT_SEARCH_FALLBACK: 'off' }],
+    [request, { PI_SCOUT_SEARCH_FALLBACK: 'brave' }],
   ]) assert.equal(braveDiscovery(req, { env: configuration }), undefined);
 });
 
@@ -69,29 +74,40 @@ test('denial, cancellation, revocation, errors and oversized responses withhold 
 test('failed or empty Exa discovery can lead to a supported original passage, never a supported snippet', async t => {
   const root = await mkdtemp(join(tmpdir(), 'scout-fallback-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const kind of ['failure', 'empty', 'success', 'old-host', 'both-fail']) {
-    let fallbackCalls = 0;
+  for (const kind of ['failure', 'empty', 'success', 'old-host', 'both-fail', 'brave-first', 'brave-first-empty', 'brave-first-cancel']) {
+    let fallbackCalls = 0, exaCalls = 0;
+    const cancel = new AbortController();
     const bridge = new ModelBridge(frame => {
       if (frame.type === 'model_request') return;
       assert.deepEqual(frame, { type: 'discovery_fallback' });
       fallbackCalls++;
-      queueMicrotask(() => bridge.accept({ type: 'discovery_result',
-        results: kind === 'both-fail' ? [] : [{ url, snippet: 'Search snippet', title: 'Policy' }] }));
+      queueMicrotask(() => {
+        if (kind === 'brave-first-cancel') cancel.abort();
+        bridge.accept({ type: 'discovery_result', results: ['both-fail', 'brave-first-empty'].includes(kind) ? [] : [{ url, snippet: 'Search snippet', title: 'Policy' }] });
+      });
     });
     const turn = bridge.request({ messages: [] }, signal);
     bridge.accept({ type: 'model_response', id: 'model-1', ...(kind === 'old-host' ? {} : { discoveryFallback: true }),
+      ...(kind.startsWith('brave-first') ? { discoveryFirst: true } : {}),
       message: { role: 'assistant', content: [], stopReason: 'stop' } });
     await turn;
     const research = createResearch(request, join(root, kind), bridge);
     await research.initialize();
     const execute = (tool, args, executeTool) => research.tools.find(item => item.name === tool)
-      .execute('id', args, signal, undefined, { executeTool });
+      .execute('id', args, cancel.signal, undefined, { executeTool });
     const query = execute('research_search', { query: 'worker wording' }, async () => {
+      exaCalls++;
+      if (kind === 'brave-first-empty') assert.equal(fallbackCalls, 1);
       if (['failure', 'old-host', 'both-fail'].includes(kind)) throw Error('private diagnostic');
       return { result: { structuredContent: { queries: [{ results: kind === 'empty' ? [] : [
         { title: 'Policy', url: url + '#first', snippet: 'Search snippet' }, { title: 'Another section', url: url + '#second' },
       ] }] } } };
     });
+    if (kind === 'brave-first-cancel') {
+      await assert.rejects(query);
+      assert.equal(exaCalls, 0);
+      continue;
+    }
     if (['old-host', 'both-fail'].includes(kind)) {
       await assert.rejects(query, { code: 'SOURCE_SEARCH_FAILED' });
       assert.equal((await research.finish('Unverified')).status, 'incomplete');
@@ -99,7 +115,8 @@ test('failed or empty Exa discovery can lead to a supported original passage, ne
       continue;
     }
     const { details } = await query;
-    assert.equal(details.queries[0].provider, kind === 'success' ? 'exa' : 'brave');
+    assert.equal(exaCalls, kind === 'brave-first' ? 0 : 1);
+    assert.equal(details.queries[0].provider, ['success', 'brave-first-empty'].includes(kind) ? 'exa' : 'brave');
     assert.deepEqual(details.queries[0].results.map(item => item.url), [url]);
     assert.equal(fallbackCalls, kind === 'success' ? 0 : 1);
     const line = research.sources()[0].text.split('\n').findIndex(value => value.includes('Search snippet')) + 1;
