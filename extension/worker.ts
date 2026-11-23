@@ -29,7 +29,8 @@ export default function scoutWorker(pi: ExtensionAPI) {
   const observe = scoutStatus(pi, 'worker', { dockerConfiguration: configuration, workerState: () => ({ busy, cleanupBlocked }) });
   pi.registerTool({
     name: 'scout_research', label: 'Scout research',
-    description: 'Research a public question in a separate Docker worker and return a sourced brief, explicitly incomplete when gaps remain. Use for external facts, documentation, comparisons and investigation. Optionally supply known exact official documentation URLs in sourceUrls so the worker can fetch them directly without a search prerequisite. Send only public question, scope and URLs, never private repository contents, credentials or conversation history. The worker uses the current Pi model through the parent; Docker public mode does not enforce every outbound URL. No publishing or implementation work.',
+    exposure: 'deferred' as const,
+    description: 'Research a public question in a separate Docker worker and return a sourced brief. Supply known HTTPS URLs in sourceUrls to fetch them directly in parallel. Send only public question, scope and URLs, never private code or secrets.',
     parameters: Type.Object({
       question: Type.String({ minLength: 1, maxLength: 4000 }),
       scope: Type.String({ minLength: 1, maxLength: 4000 }),
@@ -40,8 +41,21 @@ export default function scoutWorker(pi: ExtensionAPI) {
       if (!ctx.model) throw new Error('Select a Pi model before invoking Scout');
       if (cleanupBlocked) throw new Error('An earlier Scout setup, worker or model request did not settle. Inspect Docker and the recorded cleanup status before starting another Scout session.');
       if (busy) throw new Error('A Scout worker is already running in this Pi session');
-      const selectedModel = ctx.model;
-      const thinking = pi.getThinkingLevel();
+      // Prefer fast/cheap extraction model when configured via PI_SCOUT_MODEL or PI_ECO_MODEL_FAST;
+      // fall back to current parent model. Default worker thinking to "low" to save tokens & latency.
+      const configuredFast = process.env.PI_SCOUT_MODEL ?? process.env.PI_ECO_MODEL_FAST;
+      let selectedModel = ctx.model;
+      if (configuredFast && typeof (ctx.modelRegistry as any)?.find === 'function') {
+        const sep = configuredFast.includes('/') ? '/' : ':';
+        const idx = configuredFast.indexOf(sep);
+        if (idx > 0) {
+          const found = (ctx.modelRegistry as any).find(configuredFast.slice(0, idx), configuredFast.slice(idx + 1));
+          if (found) selectedModel = found;
+        }
+      }
+      const parentThinking = pi.getThinkingLevel();
+      const thinking = (process.env.PI_SCOUT_THINKING as any)
+        ?? (parentThinking === 'off' ? 'off' : 'low');
       const owner = captureOwner(ctx);
       const record = bindTaskHistory(pi.events, 'scout', ctx);
       const admit = bindTaskDispatch(pi.events, 'scout', ctx);

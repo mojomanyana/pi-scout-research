@@ -27,8 +27,7 @@
   ],
   "pi": {
     "skills": [
-      "./research",
-      "./scout-public"
+      "./research"
     ],
     "extensions": [
       "./extension/index.ts",

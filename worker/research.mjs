@@ -94,31 +94,43 @@ export function createResearch(request, briefRoot, bridge, { suppliedOnly = fals
       execute: observed('SOURCE_FETCH_FAILED', async (_id, _args, signal, _update, ctx) => {
         signal?.throwIfAborted();
         collection ??= (async () => {
-          const pages = [];
-          for (const [index, locator] of request.sourceUrls.entries()) {
-            signal?.throwIfAborted();
-            const url = publicUrl(locator);
-            try {
-              const versionGap = differentRelease(url, request.question + ' ' + request.scope);
-              if (versionGap) { pageGaps.push(`Supplied page ${index + 1}: ${versionGap}`); pages.push({ url, gap: versionGap }); continue; }
-              const page = await fetchPage(ctx, url, signal);
-              const windows = selectPassages(page.content, request.question + ' ' + request.scope);
-              if (!windows.length) throw scoutFailure('SOURCE_LIMIT');
-              const passages = [];
-              for (const { offset, text } of windows) {
-                const sha256 = digest(text);
-                const id = 'passage-' + digest(JSON.stringify([url, offset, sha256])).slice(0, 40);
-                add({ id, locator: url, title: `Supplied page ${index + 1}, character offset ${offset}`, retrievedAt: new Date().toISOString(), sha256, text });
-                passages.push({ sourceId: id, offset, text, lines: text.split('\n').length });
-              }
-              pages.push({ url, passages });
-            } catch (error) {
+          const urls = [...request.sourceUrls.entries()];
+          const pages = new Array(urls.length);
+          const CONCURRENCY = Math.min(4, Math.max(1, urls.length));
+          let cursor = 0;
+          const worker = async () => {
+            while (cursor < urls.length) {
+              const slot = cursor++;
+              const [index, locator] = urls[slot];
               signal?.throwIfAborted();
-              const gap = diagnostic(failureCode(error, 'SOURCE_FETCH_FAILED')).summary;
-              pageGaps.push(`Supplied page ${index + 1} (${new URL(url).hostname}): ${gap}`);
-              pages.push({ url, gap });
+              const url = publicUrl(locator);
+              try {
+                const versionGap = differentRelease(url, request.question + ' ' + request.scope);
+                if (versionGap) {
+                  pageGaps.push(`Supplied page ${index + 1}: ${versionGap}`);
+                  pages[slot] = { url, gap: versionGap };
+                  continue;
+                }
+                const page = await fetchPage(ctx, url, signal);
+                const windows = selectPassages(page.content, request.question + ' ' + request.scope);
+                if (!windows.length) throw scoutFailure('SOURCE_LIMIT');
+                const passages = [];
+                for (const { offset, text } of windows) {
+                  const sha256 = digest(text);
+                  const id = 'passage-' + digest(JSON.stringify([url, offset, sha256])).slice(0, 40);
+                  add({ id, locator: url, title: `Supplied page ${index + 1}, character offset ${offset}`, retrievedAt: new Date().toISOString(), sha256, text });
+                  passages.push({ sourceId: id, offset, text, lines: text.split('\n').length });
+                }
+                pages[slot] = { url, passages };
+              } catch (error) {
+                signal?.throwIfAborted();
+                const gap = diagnostic(failureCode(error, 'SOURCE_FETCH_FAILED')).summary;
+                pageGaps.push(`Supplied page ${index + 1} (${new URL(url).hostname}): ${gap}`);
+                pages[slot] = { url, gap };
+              }
             }
-          }
+          };
+          await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
           collected = true;
           return result({ pages, trusted: false, redirectDestinationVerified: false });
         })();
