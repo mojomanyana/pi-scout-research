@@ -29,7 +29,8 @@ export default function scoutWorker(pi: ExtensionAPI) {
   const observe = scoutStatus(pi, 'worker', { dockerConfiguration: configuration, workerState: () => ({ busy, cleanupBlocked }) });
   pi.registerTool({
     name: 'scout_research', label: 'Scout research',
-    description: 'Research a public question in a separate Docker worker and return a sourced brief, explicitly incomplete when gaps remain. Use for external facts, documentation, comparisons and investigation. Optionally supply known exact official documentation URLs in sourceUrls so the worker can fetch them directly without a search prerequisite. Send only public question, scope and URLs, never private repository contents, credentials or conversation history. The worker uses the current Pi model through the parent; Docker public mode does not enforce every outbound URL. No publishing or implementation work.',
+    exposure: 'deferred' as const,
+    description: 'Research a public question in a separate Docker worker and return a sourced brief. Supply known HTTPS URLs in sourceUrls to fetch them directly in parallel. Send only public question, scope and URLs, never private code or secrets.',
     parameters: Type.Object({
       question: Type.String({ minLength: 1, maxLength: 4000 }),
       scope: Type.String({ minLength: 1, maxLength: 4000 }),
@@ -40,8 +41,32 @@ export default function scoutWorker(pi: ExtensionAPI) {
       if (!ctx.model) throw new Error('Select a Pi model before invoking Scout');
       if (cleanupBlocked) throw new Error('An earlier Scout setup, worker or model request did not settle. Inspect Docker and the recorded cleanup status before starting another Scout session.');
       if (busy) throw new Error('A Scout worker is already running in this Pi session');
-      const selectedModel = ctx.model;
-      const thinking = pi.getThinkingLevel();
+      // Prefer fast/cheap extraction model when configured via PI_SCOUT_MODEL or PI_ECO_MODEL_FAST;
+      // validate explicit PI_SCOUT_MODEL and PI_SCOUT_THINKING instead of silently falling back.
+      const ALLOWED_THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+      const explicitModel = process.env.PI_SCOUT_MODEL?.trim();
+      const configuredFast = explicitModel || process.env.PI_ECO_MODEL_FAST?.trim();
+      let selectedModel = ctx.model;
+      if (configuredFast) {
+        const sep = configuredFast.includes('/') ? '/' : ':';
+        const idx = configuredFast.indexOf(sep);
+        const provider = idx > 0 ? configuredFast.slice(0, idx).trim() : '';
+        const modelId = idx > 0 ? configuredFast.slice(idx + 1).trim() : '';
+        if (!provider || !modelId) {
+          if (explicitModel) throw new Error('PI_SCOUT_MODEL must be provider/model');
+        } else if (typeof (ctx.modelRegistry as any)?.find === 'function') {
+          const found = (ctx.modelRegistry as any).find(provider, modelId);
+          if (found) selectedModel = found;
+          else if (explicitModel) throw new Error(`PI_SCOUT_MODEL "${explicitModel}" was not found in Pi model registry`);
+        }
+      }
+      const explicitThinking = process.env.PI_SCOUT_THINKING?.trim();
+      if (explicitThinking !== undefined && explicitThinking !== '' && !ALLOWED_THINKING.has(explicitThinking)) {
+        throw new Error(`PI_SCOUT_THINKING must be one of: ${[...ALLOWED_THINKING].join(', ')}`);
+      }
+      const parentThinking = pi.getThinkingLevel();
+      const thinking = (explicitThinking || (parentThinking === 'off' ? 'off' : 'low')) as typeof parentThinking;
+      const effectiveCtx = selectedModel === ctx.model ? ctx : { ...ctx, model: selectedModel };
       const owner = captureOwner(ctx);
       const record = bindTaskHistory(pi.events, 'scout', ctx);
       const admit = bindTaskDispatch(pi.events, 'scout', ctx);
@@ -56,7 +81,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         if (!owner.current()) throw Error('Session changed before worker setup.');
         const workspace = await workspaceIdentity(ctx.cwd).catch(() => undefined);
         observe(ctx, 'running', ['Preparing isolated research worker.']);
-        const destination = await destinationIdentity(ctx);
+        const destination = await destinationIdentity(effectiveCtx);
         let sources = [];
         if (process.env.PI_SCOUT_CATALOG) {
           try {
@@ -92,7 +117,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
           discoveryOrder: braveOrder(process.env),
           onDiscoveryFallback: destination && braveDiscovery(request, { env: process.env,
             authorized: async () => owner.current() &&
-              JSON.stringify(await destinationIdentity(ctx)) === JSON.stringify(destination) && owner.current() }),
+              JSON.stringify(await destinationIdentity(effectiveCtx)) === JSON.stringify(destination) && owner.current() }),
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: `Scout: ${stage}` }], details: { stage } }),
           onModelRequest: async (context: unknown, modelSignal: AbortSignal) => {
             // Pi resolves the selected provider and credentials in the parent.
@@ -118,7 +143,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         record(_id, 'worker-brief', incomplete ? 'partial' : completed.result.status === 'complete' ? 'recorded' : 'unconfirmed',
           `Worker research brief saved with ${completed.result.brief.findings.length} findings and ${completed.result.brief.gaps.length} gaps.`, { type: 'brief', id: saved.reference.sha256 });
         // Preserve the pre-append destination/owner fence, then recheck after optional indexing.
-        await destinationIdentity(ctx);
+        await destinationIdentity(effectiveCtx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
         const retained = { requestId: request.requestId,
@@ -130,7 +155,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         const indexed = workspace && await rememberWorkspaceBrief(briefs.root, workspace, { ...retained, kind: 'worker' }, { authorize: owner.current });
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
-        const currentDestination = await destinationIdentity(ctx);
+        const currentDestination = await destinationIdentity(effectiveCtx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
         observe(ctx, incomplete ? 'observed' : 'settled', [incomplete

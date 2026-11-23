@@ -9,7 +9,6 @@
   },
   "files": [
     "research",
-    "scout-public",
     "extension",
     "lib",
     "README.md",
@@ -27,8 +26,7 @@
   ],
   "pi": {
     "skills": [
-      "./research",
-      "./scout-public"
+      "./research"
     ],
     "extensions": [
       "./extension/index.ts",
