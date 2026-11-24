@@ -17,6 +17,8 @@ import { bindTaskDispatch, finishTaskDispatch, type CleanupState, type DispatchR
 import { bindTaskHistory } from './task-history.ts';
 import { scoutOwner } from './owner.ts';
 import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
+import { loadEcosystemConfig } from '../lib/ecosystem-config.mjs';
+import { fetchPublicOfficialPages } from '../lib/direct-fetch.mjs';
 
 export default function scoutWorker(pi: ExtensionAPI) {
   const captureOwner = scoutOwner(pi);
@@ -43,9 +45,10 @@ export default function scoutWorker(pi: ExtensionAPI) {
       if (busy) throw new Error('A Scout worker is already running in this Pi session');
       // Prefer fast/cheap extraction model when configured via PI_SCOUT_MODEL or PI_ECO_MODEL_FAST;
       // validate explicit PI_SCOUT_MODEL and PI_SCOUT_THINKING instead of silently falling back.
+      const ecoCfg = loadEcosystemConfig(process.env);
       const ALLOWED_THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
       const explicitModel = process.env.PI_SCOUT_MODEL?.trim();
-      const configuredFast = explicitModel || process.env.PI_ECO_MODEL_FAST?.trim();
+      const configuredFast = explicitModel || process.env.PI_ECO_MODEL_FAST?.trim() || ecoCfg?.models?.fast?.trim();
       let selectedModel = ctx.model;
       if (configuredFast) {
         const sep = configuredFast.includes('/') ? '/' : ':';
@@ -107,10 +110,54 @@ export default function scoutWorker(pi: ExtensionAPI) {
         signal?.throwIfAborted();
         if (!owner.current()) throw Error('Session changed before worker setup.');
         cleanup = 'unknown';
-        const { image, mode, dockerPath, dockerArgs } = await prepareWorker({ env: configuration, signal,
-          onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: stage === 'building'
-            ? 'Scout: preparing the research worker for first use. This can take a few minutes.' : `Scout: ${stage}` }], details: { stage } }),
-        });
+        const directAllowed = process.env.PI_SCOUT_DIRECT_URLS === '1' || ecoCfg?.scout?.directUrls === true;
+        let workerPrep;
+        try {
+          workerPrep = await prepareWorker({ env: configuration, signal,
+            onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: stage === 'building'
+              ? 'Scout: preparing the research worker for first use. This can take a few minutes.' : `Scout: ${stage}` }], details: { stage } }),
+          });
+        } catch (setupErr: any) {
+          if (
+            directAllowed &&
+            Array.isArray(args.sourceUrls) &&
+            args.sourceUrls.length > 0 &&
+            (configuration.PI_SCOUT_WORKER_MODE ?? 'public') === 'public' &&
+            ['DOCKER_MISSING', 'DOCKER_UNAVAILABLE'].includes(setupErr?.code)
+          ) {
+            cleanup = 'not-started';
+            const pages = await fetchPublicOfficialPages({
+              question: args.question,
+              scope: args.scope,
+              sourceUrls: args.sourceUrls,
+              signal,
+            });
+            const excerptBlocks = pages.map((p: any, i: number) =>
+              p.error
+                ? `Source ${i + 1} (${p.url}): FAILED (${p.error})`
+                : `Source ${i + 1} (${p.url}):\n${p.passages.map((w: any) => w.text.slice(0, 2000)).join('\n---\n')}`,
+            ).join('\n\n');
+            const summaryStream = ctx.modelRegistry.streamSimple(selectedModel, {
+              messages: [{
+                role: 'user',
+                content: [{
+                  type: 'text',
+                  text: `Answer the question concisely using ONLY these fetched official doc excerpts. Cite URLs and list any gaps.\nQuestion: ${args.question}\nScope: ${args.scope}\n\n${excerptBlocks.slice(0, 24000)}`,
+                }],
+                timestamp: Date.now(),
+              }],
+            } as any, { signal, reasoning: 'low' });
+            const msg = await summaryStream.result();
+            const answerText = (msg?.content ?? []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('\n').trim();
+            observe(ctx, 'settled', ['Direct HTTPS official-docs fetch completed (Docker unavailable).']);
+            return {
+              content: [{ type: 'text', text: `[Scout Direct HTTPS Mode — Docker unavailable]\n\n${answerText || '(no answer)'}` }],
+              details: { mode: 'direct-urls', pages: pages.map((p: any) => ({ url: p.url, ok: !p.error, error: p.error })) },
+            };
+          }
+          throw setupErr;
+        }
+        const { image, mode, dockerPath, dockerArgs } = workerPrep;
         phase = 'research';
         const completed = await runScout({ request, image, signal,
           dockerPath, dockerArgs,
