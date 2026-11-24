@@ -56,6 +56,25 @@ export default function research(pi: ExtensionAPI) {
   const store = new BriefStore(process.env.PI_SCOUT_BRIEFS ?? join(homedir(), '.pi-scout-research', 'briefs'));
   const result = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }], details: value });
 
+  // Contextual activation: keep Turn-1 payload 0B on ordinary coding tasks,
+  // but activate Scout tools automatically when PI_SCOUT_CATALOG is configured or the prompt requests Scout/research.
+  const SCOUT_TRIGGER_RE = /\b(scout|research_sources|research_read|research_brief|scout_research|scout_brief_read|research\s+brief|catalog)\b/i;
+  pi.on('before_agent_start', (event: any) => {
+    if (typeof (pi as any).getActiveTools !== 'function' || typeof (pi as any).setActiveTools !== 'function') return;
+    const prompt = typeof event?.prompt === 'string' ? event.prompt : '';
+    const wantsLocal = Boolean(sourceFile || profileFile);
+    const wantsPrompt = SCOUT_TRIGGER_RE.test(prompt);
+    if (!wantsLocal && !wantsPrompt) return;
+    const active = new Set<string>((pi as any).getActiveTools());
+    const toEnable = ['scout_research', 'scout_brief_read', 'research_sources', 'research_read', 'research_brief'];
+    const registered = new Set<string>(typeof (pi as any).getAllTools === 'function' ? (pi as any).getAllTools().map((t: any) => t.name) : toEnable);
+    let changed = false;
+    for (const name of toEnable) {
+      if (registered.has(name) && !active.has(name)) { active.add(name); changed = true; }
+    }
+    if (changed) (pi as any).setActiveTools([...active]);
+  });
+
   pi.registerTool({
     name: 'research_sources', label: 'Research sources',
     exposure: 'deferred' as const,
