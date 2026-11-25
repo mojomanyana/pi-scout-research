@@ -2,21 +2,32 @@
 
 Scout provides a portable Pi research skill, source snapshots and private briefs. Its optional Docker worker lets an agent delegate a public research question through one tool, `scout_research`. Released under MIT.
 
-The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. The connector declares Pi 1.4.0 or later and Node 24 or later. Retained scripted native checks cover exact Pi 1.4.0 and 1.5.2 on Node 24.19.0; they do not qualify every later Pi version or live model quality. The worker pins Pi 1.4.0, Node 24.19.0 and pi-web-access 0.38.0.
+The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. Scout uses **contextual deferred tool activation** (0 extra tools on Turn 1 unless research is requested), deterministic parallel URL fetching (`concurrency=4`), fast-tier model routing from `~/.pi/agent/ecosystem.json` (`models.fast` or `PI_SCOUT_MODEL`), and optional Docker isolation (pinned `node:24.19.0-bookworm-slim` with automatic stale-image pruning).
 
-To set up all five packages and resume a task across Pi sessions, follow the [Pi ecosystem quickstart](https://github.com/mojomanyana/pi-daddy#start-here).
+To set up all five packages with one command, run `npx pi-daddy@1.0.1 setup` or see the [Pi ecosystem quickstart](https://github.com/mojomanyana/pi-daddy#start-here).
 
 ## Use from Pi
 
-With Pi and Docker running on the same computer, install Scout:
+Install Scout:
 
 ```bash
-pi install npm:pi-scout-research
+pi install npm:pi-scout-research@1.0.1
 ```
 
-Start Pi, or `/reload` an idle Pi session after installation, and ask Scout a public research question. No environment variables or separate build command are required. On first use, Scout finds Docker, prepares its worker from the installed package and shows progress. Later requests reuse the matching image. An update rebuilds only when Docker build inputs change. Concurrent sessions share preparation instead of launching duplicate builds.
+Start Pi (or `/reload` an idle session) and ask Scout a public research question. No environment variables or separate build command are required. On first open-web use, Scout finds Docker, builds its pinned worker from the installed package, and reuses that image on subsequent calls.
 
-The first preparation downloads the pinned Node/Pi/web runtime and npm dependencies, which can take a few minutes. Docker must already be installed and running; Scout does not install Docker, start shared services or alter system settings. If Docker is unavailable, the tool explains what is missing. It does not fall back to host web access. The npm package contains the complete build context and lockfile; neither a Git checkout nor OpenShell is needed. No Docker image is published separately.
+### Direct Official-Docs Mode (No Docker Required)
+
+If Docker is closed or unavailable and you supply explicit `sourceUrls` (official documentation URLs), you can opt into SSRF-safe direct HTTPS fetching via `~/.pi/agent/ecosystem.json`:
+
+```json
+{
+  "models": { "fast": "fireworks/accounts/fireworks/models/glm-5p3-flash" },
+  "scout": { "directUrls": true }
+}
+```
+
+Or per-session via `PI_SCOUT_DIRECT_URLS=1`. Direct mode only fetches explicitly supplied `https://` URLs after DNS resolution checks block localhost, RFC1918 private IPs, link-local/cloud metadata (`169.254.169.254`), and private IPv6 ranges (2 MiB / 15s limit, no cookies). Open-ended web search still requires Docker isolation.
 
 Choose your normal Pi model. Ask, for example: “Use Scout to compare the current Node.js support policies for these two public libraries. Give me the relevant sources and uncertainty.” No special skill sequence is required. Scout captures the parent's selected model and thinking level at dispatch. Each model turn uses Pi's native provider/authentication support in the parent and consumes its normal usage allowance. Credentials stay outside the container.
 
@@ -35,7 +46,7 @@ export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 
 Scout's `scout_research` implementation runs in the Pi session where Scout is loaded; no Docker command or image parameter is supplied by the model, and that session owns its worker lifecycle. A governed child can call it only when Daddy explicitly offers a parent-run tool for that delegation. Daddy's parent-tool proxy runs the real tool in the root session; it does not install Scout in the child. The proxy requires a callable parent tool and a supported host connection, and currently supports a direct child using the root's provider and model. It cannot be passed through another child. Permission alone does not supply a missing tool or proxy.
 
-The optional `scout-public` skill is narrow guidance for that one tool and declares only `scout_research`. Use it inline (`/skill:scout-public`) wherever that tool is callable, or delegate it when Daddy reports the parent-run tool as available for the selected child. Use actual capability information, not the package version or the parent's tool catalog alone. On hosts without that route, including the tested pi-daddy 0.59.1, the parent or coordinator calls Scout and gives the findings and exact brief reference to Investigate, Architect, Decide or another role. Include the findings it needs: a research proxy does not give the child `scout_brief_read`, so the reference alone may not be readable there. Existing role tool restrictions remain; no Principal dependency is introduced.
+The optional `scout-public` skill is narrow guidance for that one tool and declares only `scout_research`. Use it inline (`/skill:scout-public`) wherever that tool is callable, or delegate it when Daddy reports the parent-run tool as available for the selected child. On hosts without that route, the parent or coordinator calls Scout and passes the findings and exact brief reference to `architect`, `build`, `review`, or `debug`. Include the findings it needs: a research proxy does not give the child `scout_brief_read`, so the reference alone may not be readable there. Existing role tool restrictions remain; no Principal dependency is introduced.
 
 ## Use with the rest of the ecosystem
 
@@ -55,14 +66,7 @@ and which independent work is already authorized. Preserve explicit user stop
 conditions and evidence gates; explain a proposed narrower next step rather than
 silently overriding a gate.
 
-Harness's optional `jev_advice` may help the parent assess whether that proposed
-lookup is useful when workflow advice is already enabled. It does not select tools
-automatically, supply access, approve a result or replace evidence. The `scout-public`
-skill still declares only `scout_research` and adds no Bookie or JEV capability; used
-inline it is guidance and does not restrict the parent session's other tools. Scout
-runs in the parent session and confirms its own worker cleanup. Daddy owns delegation
-and cleanup of the roles that receive the result, and Principal (or another role package)
-owns the product decision. No extra component is required for ordinary Scout use.
+The `scout-public` skill declares only `scout_research` and adds no external dependency; used inline it is guidance and does not restrict the parent session's other tools. Scout runs in the parent session and confirms its own worker cleanup. Daddy owns delegation and cleanup of the roles that receive the result, and Principal (or another role package) owns the product decision. No extra component is required for ordinary Scout use.
 
 ## Modes and limits
 

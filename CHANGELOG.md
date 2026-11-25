@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.1 — 2026-11-25
+
+- Updated `README.md` and `CHANGELOG.md` to document `ecosystem.json` (`models.fast`, `scout.directUrls`), SSRF-safe direct official-docs fetch mode, contextual deferred tool activation, and removed stale JEV / retired Principal role references.
+
+## 1.0.0 — 2026-11-24
+
+- Added opt-in SSRF-safe direct HTTPS fetch mode (`scout.directUrls: true` / `PI_SCOUT_DIRECT_URLS=1`) for user-supplied official documentation URLs when Docker is unavailable.
+- Added shared `~/.pi/agent/ecosystem.json` reader (`lib/ecosystem-config.mjs`) for `models.fast` and `scout.directUrls`.
+
+## 0.7.2 — 2026-11-24
+
+- Added contextual deferred tool activation, deterministic parallel URL fetching (`concurrency=4`), Tier-0 fast model routing, pinned `node:24.19.0-bookworm-slim` Dockerfile with stale image pruning, `.gitattributes`, and OIDC `publish.yml`.
+
 ## 0.6.0 — 2026-11-21
 
 - Requests with supplied URLs use a shared six-call research budget. Repeated reads reuse exact passages, and unavailable pages or conflicting findings leave the brief incomplete.
