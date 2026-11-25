@@ -46,7 +46,7 @@ export PI_SCOUT_DOCKER_HOST='npipe:////./pipe/dockerDesktopLinuxEngine'
 
 Scout's `scout_research` implementation runs in the Pi session where Scout is loaded; no Docker command or image parameter is supplied by the model, and that session owns its worker lifecycle. A governed child can call it only when Daddy explicitly offers a parent-run tool for that delegation. Daddy's parent-tool proxy runs the real tool in the root session; it does not install Scout in the child. The proxy requires a callable parent tool and a supported host connection, and currently supports a direct child using the root's provider and model. It cannot be passed through another child. Permission alone does not supply a missing tool or proxy.
 
-The optional `scout-public` skill is narrow guidance for that one tool and declares only `scout_research`. Use it inline (`/skill:scout-public`) wherever that tool is callable, or delegate it when Daddy reports the parent-run tool as available for the selected child. On hosts without that route, the parent or coordinator calls Scout and passes the findings and exact brief reference to `architect`, `build`, `review`, or `debug`. Include the findings it needs: a research proxy does not give the child `scout_brief_read`, so the reference alone may not be readable there. Existing role tool restrictions remain; no Principal dependency is introduced.
+The package provides the `/skill:research` command for guided research. When a governed child needs `scout_research`, use Daddy's reported parent-run tool availability for that child. If the tool is unavailable there, call Scout in the parent and pass the findings and any saved brief reference to the role continuing the work. The child needs the findings themselves when it cannot call `scout_brief_read`.
 
 ## Use with the rest of the ecosystem
 
@@ -66,7 +66,7 @@ and which independent work is already authorized. Preserve explicit user stop
 conditions and evidence gates; explain a proposed narrower next step rather than
 silently overriding a gate.
 
-The `scout-public` skill declares only `scout_research` and adds no external dependency; used inline it is guidance and does not restrict the parent session's other tools. Scout runs in the parent session and confirms its own worker cleanup. Daddy owns delegation and cleanup of the roles that receive the result, and Principal (or another role package) owns the product decision. No extra component is required for ordinary Scout use.
+Scout reports cleanup for workers it starts. Daddy manages delegation and cleanup for the roles that receive a result. The coordinating role owns the product decision.
 
 ## Modes and limits
 
