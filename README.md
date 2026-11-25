@@ -4,14 +4,14 @@ Scout provides a portable Pi research skill, source snapshots and private briefs
 
 The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. Scout uses **contextual deferred tool activation** (0 extra tools on Turn 1 unless research is requested), deterministic parallel URL fetching (`concurrency=4`), fast-tier model routing from `~/.pi/agent/ecosystem.json` (`models.fast` or `PI_SCOUT_MODEL`), and optional Docker isolation (pinned `node:24.19.0-bookworm-slim` with automatic stale-image pruning).
 
-To set up all five packages with one command, run `npx pi-daddy@1.0.1 setup` or see the [Pi ecosystem quickstart](https://github.com/mojomanyana/pi-daddy#start-here).
+For the complete ecosystem, follow the [Pi ecosystem quickstart](https://github.com/mojomanyana/pi-daddy#start-here).
 
 ## Use from Pi
 
 Install Scout:
 
 ```bash
-pi install npm:pi-scout-research@1.0.1
+pi install npm:pi-scout-research
 ```
 
 Start Pi (or `/reload` an idle session) and ask Scout a public research question. No environment variables or separate build command are required. On first open-web use, Scout finds Docker, builds its pinned worker from the installed package, and reuses that image on subsequent calls.
@@ -158,17 +158,17 @@ If the session changes before failure, diagnostics are withheld from the new bra
 
 ## Portable skill and local sources
 
-`/skill:research` works without Docker using available Pi research tools. Installing the package alone does not isolate host tools. The `scout_research` tool always uses its Docker worker and prepares it automatically; Docker errors do not silently enable host web access.
+`/skill:research` can read local sources without Docker. The `scout_research` tool uses Docker for open-ended web research. If Docker is unavailable, direct mode can fetch explicitly supplied documentation URLs when the operator has enabled it.
 
 When pi-daddy manages a task, starting the worker or fetching an uncached approved web page uses its shared admission and cancellation controls. A read of saved source lines needs no new allowance. Simultaneous requests for the same page on one branch share one fetch; a late result cannot add that page to another branch. A saved brief retains its own hash and coverage under the originating task.
 
-The local extension provides `research_sources`, `research_read` and `research_brief`. Prepare a catalog with `npx --yes --package=pi-scout-research@0.3.0 scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
+The local extension provides `research_sources`, `research_read` and `research_brief`. Run `scout-catalog approved-sources.json new-catalog.json` with the CLI from the Scout installation that will read the catalog. For a standalone run, use `npx --package=pi-scout-research scout-catalog approved-sources.json new-catalog.json`. The input is an explicit array:
 
 ```json
 [{"id":"release","title":"Release notes","path":"./release-notes.txt","locator":"local:release-notes.txt"}]
 ```
 
-Only those UTF-8 files are read, relative to the manifest. The new output must not exist. No recursive scan or network access occurs. Set `PI_SCOUT_CATALOG` before Pi starts. Source IDs and SHA-256 hashes identify exact snapshots; matching quotations do not establish semantic truth.
+Only those UTF-8 files are read, relative to the manifest. The new output must not exist. No recursive scan or network access occurs. Set `PI_SCOUT_CATALOG` before Pi starts. Source IDs and SHA-256 hashes identify exact snapshots; matching quotations do not establish semantic truth. When `research_read` returns `nextOffset`, repeat the same source and line range with that value as `offset` to read the next page. Cite the original line numbers. Multiline quotes retain the source's line endings.
 
 The separate experimental host adapter accepts `PI_SCOUT_WEB_PROFILE` with exact configured URLs via pi-web-access. The worker does not use it. It does not enforce whole-process networking. Historical offline/reference/dynamic fixtures and new worker checks have separate evidence; neither establishes live model quality.
 # Compact evidence references
