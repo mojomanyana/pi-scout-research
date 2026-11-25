@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.2 - 2026-11-25
+
+- Page oversized source lines without splitting Unicode characters.
+- Preserve exact multiline citation text across LF and CRLF sources.
+- Align documented research commands with the installed package.
+
 ## 1.0.1 — 2026-11-25
 
 - Updated `README.md` and `CHANGELOG.md` to document `ecosystem.json` (`models.fast`, `scout.directUrls`), SSRF-safe direct official-docs fetch mode, contextual deferred tool activation, and removed stale JEV / retired Principal role references.
