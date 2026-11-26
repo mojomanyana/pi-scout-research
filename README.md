@@ -2,7 +2,7 @@
 
 Scout provides a portable Pi research skill, source snapshots and private briefs. Its optional Docker worker lets an agent delegate a public research question through one tool, `scout_research`. Released under MIT.
 
-The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. Scout uses **contextual deferred tool activation** (0 extra tools on Turn 1 unless research is requested), deterministic parallel URL fetching (`concurrency=4`), fast-tier model routing from `~/.pi/agent/ecosystem.json` (`models.fast` or `PI_SCOUT_MODEL`), and optional Docker isolation (pinned `node:24.19.0-bookworm-slim` with automatic stale-image pruning).
+The skill does not depend on Principal, pi-daddy or skill-harness. Those packages can use Scout through normal Pi tool discovery and governance. Scout uses **contextual deferred tool activation** (0 extra tools on Turn 1 unless research is requested), deterministic parallel URL fetching (`concurrency=4`), research using the active Pi model by default (choose another in Dashboard Settings or set `scout.model` in `ecosystem.json`), and optional Docker isolation (pinned `node:24.19.0-bookworm-slim` with automatic stale-image pruning).
 
 For the complete ecosystem, follow the [Pi ecosystem quickstart](https://github.com/mojomanyana/pi-daddy#start-here).
 
