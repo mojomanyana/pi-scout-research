@@ -71,6 +71,7 @@ test('direct HTTPS reports source, provider and answer failures before publishin
   const message = (text, stopReason = 'stop') => () => ({result:async()=>({stopReason,content:[{type:'text',text}]})});
   const fail = () => { throw Error('private-provider-diagnostic'); };
   for (const [reply, expected] of [[message('   '),'ANSWER_MISSING'],[fail,'MODEL_REQUEST_FAILED'],
+    [message('private-provider-diagnostic','error'),'MODEL_REQUEST_FAILED'],
     [()=>({result:async()=>fail()}),'MODEL_REQUEST_FAILED'],[message('partial','length'),'MODEL_INCOMPLETE']]) {
     response = reply;
     const result = await run();
