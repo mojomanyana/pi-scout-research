@@ -107,18 +107,21 @@ export default function scoutWorker(pi: ExtensionAPI) {
             ['DOCKER_MISSING', 'DOCKER_UNAVAILABLE'].includes(setupErr?.code)
           ) {
             cleanup = 'not-started';
+            phase = 'research';
             const pages = await fetchPublicOfficialPages({
               question: args.question,
               scope: args.scope,
               sourceUrls: args.sourceUrls,
               signal,
             });
+            if (signal?.aborted) throw scoutFailure('CANCELLED');
+            if (!pages.some(p => p.passages?.some(w => w.text.trim()))) throw scoutFailure('SOURCE_FETCH_FAILED');
             const excerptBlocks = pages.map((p: any, i: number) =>
               p.error
                 ? `Source ${i + 1} (${p.url}): FAILED (${p.error})`
                 : `Source ${i + 1} (${p.url}):\n${p.passages.map((w: any) => w.text.slice(0, 2000)).join('\n---\n')}`,
             ).join('\n\n');
-            const summaryStream = ctx.modelRegistry.streamSimple(selectedModel, {
+            const context = {
               messages: [{
                 role: 'user',
                 content: [{
@@ -127,13 +130,23 @@ export default function scoutWorker(pi: ExtensionAPI) {
                 }],
                 timestamp: Date.now(),
               }],
-            } as any, { signal, ...(thinking === 'off' ? {} : { reasoning: thinking }) });
-            const msg = await summaryStream.result();
+            };
+            let msg;
+            try {
+              msg = await ctx.modelRegistry.streamSimple(selectedModel, context as any,
+                { signal, ...(thinking === 'off' ? {} : { reasoning: thinking }) }).result();
+            } catch {
+              throw scoutFailure(signal?.aborted ? 'CANCELLED' : 'MODEL_REQUEST_FAILED');
+            }
+            if (signal?.aborted) throw scoutFailure('CANCELLED');
             if (msg?.stopReason === 'error' || msg?.stopReason === 'aborted') throw scoutFailure('MODEL_REQUEST_FAILED');
-            const answerText = (msg?.content ?? []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('\n').trim();
+            if (!msg || !Array.isArray(msg.content)) throw scoutFailure('MODEL_RESPONSE_INVALID');
+            if (msg.stopReason !== 'stop') throw scoutFailure('MODEL_INCOMPLETE');
+            const answerText = msg.content.filter(c => c?.type === 'text' && typeof c.text === 'string').map(c => c.text).join('\n').trim();
+            if (!answerText) throw scoutFailure('ANSWER_MISSING');
             observe(ctx, 'settled', ['Direct HTTPS official-docs fetch completed (Docker unavailable).']);
             return {
-              content: [{ type: 'text', text: `[Scout Direct HTTPS Mode — Docker unavailable]\n\n${answerText || '(no answer)'}` }],
+              content: [{ type: 'text', text: `[Scout Direct HTTPS Mode - Docker unavailable]\n\n${answerText}` }],
               details: { mode: 'direct-urls', pages: pages.map((p: any) => ({ url: p.url, ok: !p.error, error: p.error })) },
             };
           }

@@ -54,6 +54,41 @@ async function fixture(t, callback, setup = async ({ env }) => ({ image: env.PI_
     setThinking: value => { thinking = value; } };
 }
 
+test('direct HTTPS reports source, provider and answer failures before publishing success', enabled, async t => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'scout-direct-profile-'));
+  t.after(() => rm(agentDir, { recursive: true, force: true }));
+  const fx = await fixture(t, () => assert.fail('unexpected Docker dispatch'), async () => {
+    throw Object.assign(new Error('fixture'), {code:'DOCKER_UNAVAILABLE'});
+  }, {PI_SCOUT_WORKER_MODE:'public', PI_SCOUT_DIRECT_URLS:'1', PI_CODING_AGENT_DIR:agentDir});
+  let fetchOk = true;
+  t.mock.method(globalThis, 'fetch', async () => new Response(fetchOk ? 'Fixture evidence' : '', {status:fetchOk ? 200 : 503}));
+  let response, calls = 0;
+  const ctx = {model, modelRegistry:{
+    streamSimple() { calls++; return response(); },
+  }, sessionManager:{getSessionId:()=>'direct',getBranch:()=>fx.entries}};
+  const run = () => fx.tool.execute('direct', {question:'Find fixture evidence',scope:'Fixture',
+    sourceUrls:['https://93.184.216.34/fixture']},new AbortController().signal,undefined,ctx);
+  const message = (text, stopReason = 'stop') => () => ({result:async()=>({stopReason,content:[{type:'text',text}]})});
+  const fail = () => { throw Error('private-provider-diagnostic'); };
+  for (const [reply, expected] of [[message('   '),'ANSWER_MISSING'],[fail,'MODEL_REQUEST_FAILED'],
+    [()=>({result:async()=>fail()}),'MODEL_REQUEST_FAILED'],[message('partial','length'),'MODEL_INCOMPLETE']]) {
+    response = reply;
+    const result = await run();
+    assert.equal(result.isError,true);
+    assert.equal(result.details.failure.code,expected);
+    assert.equal(fx.entries.at(-1).data.code,expected);
+    assert.doesNotMatch(JSON.stringify(result),/private-provider-diagnostic/);
+  }
+  response = message('Fixture answer');
+  const success = await run();
+  assert.equal(success.details.mode,'direct-urls');
+  assert.match(success.content[0].text,/Fixture answer/);
+  fetchOk = false;
+  const before = calls;
+  assert.equal((await run()).details.failure.code,'SOURCE_FETCH_FAILED');
+  assert.equal(calls,before);
+});
+
 test('Scout extension loads through the selected native Pi SDK and exposes question/scope plus optional source URLs', enabled, async () => {
   const { loadExtensions } = await sdkImport('dist/core/extensions/loader.js');
   const loaded = await loadExtensions([join(product, 'extension', 'worker.ts')], product);
