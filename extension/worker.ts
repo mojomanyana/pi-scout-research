@@ -158,10 +158,63 @@ export default function scoutWorker(pi: ExtensionAPI) {
             if (msg.stopReason !== 'stop') throw scoutFailure('MODEL_INCOMPLETE');
             const answerText = msg.content.filter(c => c?.type === 'text' && typeof c.text === 'string').map(c => c.text).join('\n').trim();
             if (!answerText) throw scoutFailure('ANSWER_MISSING');
-            observe(ctx, 'settled', ['Direct HTTPS official-docs fetch completed (Docker unavailable).']);
+            const directBrief = {
+              version: 1,
+              mode: 'direct-urls',
+              question: args.question,
+              scope: args.scope,
+              questions: [],
+              doneWhen: 'Answered from supplied official public HTTPS sources',
+              findings: [{
+                claim: answerText.slice(0, 1600),
+                status: 'supported',
+                reason: 'Direct HTTPS official-docs fetch (Docker unavailable)',
+                citations: pages.filter((p: any) => !p.error).slice(0, 4).map((p: any) => ({
+                  locator: p.url,
+                  quote: (p.passages?.[0]?.text ?? '').slice(0, 300),
+                })),
+              }],
+              gaps: pages.filter((p: any) => p.error).map((p: any) => `${p.url}: ${p.error}`),
+            };
+            let directSaved;
+            try { directSaved = await briefs.save(owner.sessionId, directBrief); }
+            catch { throw scoutFailure('BRIEF_STORAGE_FAILED'); }
+            if (!owner.current()) {
+              return { content: [{ type: 'text', text: 'Scout retained a direct-HTTPS research record for the previous session branch; output is withheld from the new branch.' }],
+                details: { mode: 'direct-urls', outputWithheld: true, reason: 'owner-changed', cleanup: { state: 'not-started', workerStarted: false } } };
+            }
+            const directRetained = {
+              requestId: request.requestId,
+              reference: directSaved.reference,
+              destination,
+              mode: 'direct-urls',
+              savedAt: new Date().toISOString(),
+              researchStatus: 'complete',
+            };
+            pi.appendEntry('scout-worker-brief-v2', directRetained);
+            if (workspace) await rememberWorkspaceBrief(briefs.root, workspace, { ...directRetained, kind: 'worker' }, { authorize: owner.current }).catch(() => false);
+            observe(ctx, 'settled', ['Direct HTTPS official-docs fetch completed (Docker unavailable; no worker container started).']);
+            try {
+              pi.events?.emit?.('pi-daddy:ecosystem-activity:v1', {
+                producer: 'scout',
+                kind: 'scout-brief-saved',
+                briefSha256: directSaved.reference.sha256,
+                detail: `Scout · returned direct-HTTPS brief (${pages.filter((p: any) => !p.error).length} source(s), no Docker worker started)`,
+              });
+            } catch { /* Optional activity event cannot interrupt research. */ }
             return {
-              content: [{ type: 'text', text: `[Scout Direct HTTPS Mode - Docker unavailable]\n\n${answerText}` }],
-              details: { mode: 'direct-urls', pages: pages.map((p: any) => ({ url: p.url, ok: !p.error, error: p.error })) },
+              content: [{
+                type: 'text',
+                text: `[Scout Direct HTTPS Mode - Docker unavailable]\n\n${answerText}\n\nScout brief reference: ${JSON.stringify(directSaved.reference)}\nScout worker cleanup: not-started (direct-urls mode; no Docker worker started).`,
+              }],
+              details: {
+                mode: 'direct-urls',
+                cleanup: { state: 'not-started', workerStarted: false, mode: 'direct-urls' },
+                briefPath: directSaved.path,
+                briefSha256: directSaved.sha256,
+                briefReference: directSaved.reference,
+                pages: pages.map((p: any) => ({ url: p.url, ok: !p.error, error: p.error })),
+              },
             };
           }
           throw setupErr;
@@ -248,7 +301,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
           briefReference: saved.reference,
           semanticApproval: false, protectedOnline: false };
         const modelUsage = usageText(completed.runtime.usage);
-        return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout worker cleanup: confirmed.${modelUsage ? `\n${modelUsage}` : ''}` }], details };
+        return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: `${partialAnswer ?? completed.result.answer}\n\nScout brief saved: ${saved.path}\nScout brief reference: ${JSON.stringify(saved.reference)}\nScout worker cleanup: confirmed.${modelUsage ? `\n${modelUsage}` : ''}` }], details };
       } catch (error) {
         if (error?.runtime?.cleanup?.confirmed === true && error.runtime.modelCallbackSettled !== false && error.runtime.discoveryCallbackSettled !== false) cleanup = 'settled';
         if (error?.code === 'SETUP_UNSETTLED' || error?.runtime && (error.runtime.cleanup?.confirmed !== true || error.runtime.modelCallbackSettled === false || error.runtime.discoveryCallbackSettled === false)) {

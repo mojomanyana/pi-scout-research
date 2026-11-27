@@ -73,10 +73,14 @@ export default function scoutBriefs(pi: ExtensionAPI) {
     try {
       if (!ctx || !specialist || request.sessionId !== ctx.sessionManager.getSessionId() || await realpath(request.cwd) !== await realpath(ctx.cwd))
         return request.reply({ ...identity, ok: false, status: 'denied', reason: 'workspace or session mismatch' });
-      const attached = Array.isArray(request.attachedBriefSha256) ? new Set(request.attachedBriefSha256.filter((x: unknown) => typeof x === 'string')) : null;
+      if (!Array.isArray(request.attachedBriefSha256))
+        return request.reply({ ...identity, ok: false, status: 'denied', reason: 'brief assignment evidence is absent' });
+      const attached = new Set(request.attachedBriefSha256.filter((x: unknown): x is string => typeof x === 'string' && /^[a-f0-9]{64}$/.test(x)));
+      if (attached.size === 0)
+        return request.reply({ ...identity, ok: false, status: 'denied', reason: 'no briefs are attached to this specialist assignment' });
       const key = referenceKey(request.reference);
       const sha = request.reference?.sha256;
-      if (attached && (!sha || !attached.has(sha)))
+      if (typeof sha !== 'string' || !attached.has(sha))
         return request.reply({ ...identity, ok: false, status: 'denied', reason: 'brief is not attached to this specialist assignment' });
       if (!(await validAssignedDestination(ctx, request.childModel)))
         return request.reply({ ...identity, ok: false, status: 'denied', reason: 'specialist destination model is not authorized or configured' });

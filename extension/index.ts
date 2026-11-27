@@ -62,13 +62,17 @@ export default function research(pi: ExtensionAPI) {
   const activateScoutTools = () => {
     if (process.env.PI_SCOUT_DEFER_TOOLS === '1') return;
     if (typeof (pi as any).getActiveTools !== 'function' || typeof (pi as any).setActiveTools !== 'function') return;
-    const active = new Set<string>((pi as any).getActiveTools());
-    const registered = new Set<string>(typeof (pi as any).getAllTools === 'function' ? (pi as any).getAllTools().map((t: any) => t.name) : SCOUT_TOOL_NAMES);
-    let changed = false;
-    for (const name of SCOUT_TOOL_NAMES) {
-      if (registered.has(name) && !active.has(name)) { active.add(name); changed = true; }
+    try {
+      const active = new Set<string>((pi as any).getActiveTools());
+      const registered = new Set<string>(typeof (pi as any).getAllTools === 'function' ? (pi as any).getAllTools().map((t: any) => t.name) : SCOUT_TOOL_NAMES);
+      let changed = false;
+      for (const name of SCOUT_TOOL_NAMES) {
+        if (registered.has(name) && !active.has(name)) { active.add(name); changed = true; }
+      }
+      if (changed) (pi as any).setActiveTools([...active]);
+    } catch {
+      // Extension runtime actions may not be initialized in loader-only test harnesses; ignore safely.
     }
-    if (changed) (pi as any).setActiveTools([...active]);
   };
   pi.on('session_start', activateScoutTools);
   pi.on('before_agent_start', activateScoutTools);

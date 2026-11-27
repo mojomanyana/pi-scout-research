@@ -115,6 +115,13 @@ test('assigned specialist can read attached Scout brief across configured local 
   const saved = (await local.tools.get('research_brief').definition.execute('c1', {
     question: 'Check API', scope: 'Docs', questions: [], doneWhen: 'Done', findings: [], gaps: ['None'],
   }, new AbortController().signal, undefined, ctx)).details;
+  const otherSaved = (await local.tools.get('research_brief').definition.execute('c2', {
+    question: 'Different topic', scope: 'Other docs', questions: [], doneWhen: 'Done', findings: [], gaps: ['None'],
+  }, new AbortController().signal, undefined, ctx)).details;
+  // Confirm target brief already exists on the active branch before testing denied assignment cases.
+  const directRead = await reader.tools.get('scout_brief_read').definition.execute('c3', { reference: saved.reference }, new AbortController().signal, undefined, ctx);
+  assert.equal(directRead.details.ok, true);
+  assert.equal(directRead.details.complete, true);
   const events = [];
   bus.on('pi-daddy:ecosystem-activity:v1', (ev) => events.push(ev));
   const askSpecialist = (extra = {}) => new Promise(reply => bus.emit('scout:specialist-brief-read:v1', {
@@ -122,21 +129,41 @@ test('assigned specialist can read attached Scout brief across configured local 
     specialist: 'investigate', childModel: 'ollama/qwen3:32b',
     attachedBriefSha256: [saved.reference.sha256], reference: saved.reference, reply, ...extra,
   }));
+  // 1. Authorized cross-model read succeeds and emits attribution
   const ok = await askSpecialist();
   assert.equal(ok.ok, true);
   assert.equal(ok.result.specialist, 'investigate');
   assert.match(ok.result.excerpt, /Check API/);
   assert.ok(events.some(e => e.specialist === 'investigate' && /investigate read brief/.test(e.detail)));
-  // Unattached brief is denied
-  const unattached = await askSpecialist({ attachedBriefSha256: ['0'.repeat(64)] });
-  assert.equal(unattached.ok, false);
-  assert.equal(unattached.status, 'denied');
-  // Unconfigured destination model is denied
+  // 2. Omitted attachment list fails closed even when brief is on active branch
+  const omitted = await askSpecialist({ attachedBriefSha256: undefined });
+  assert.equal(omitted.ok, false);
+  assert.equal(omitted.status, 'denied');
+  assert.match(omitted.reason, /absent/i);
+  // 3. Empty attachment list fails closed even when brief is on active branch
+  const empty = await askSpecialist({ attachedBriefSha256: [] });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.status, 'denied');
+  assert.match(empty.reason, /no briefs are attached/i);
+  // 4. Different attached brief fails closed even when target brief is on active branch
+  const different = await askSpecialist({ attachedBriefSha256: [otherSaved.reference.sha256] });
+  assert.equal(different.ok, false);
+  assert.equal(different.status, 'denied');
+  assert.match(different.reason, /not attached/i);
+  // 5. Unconfigured destination model is denied
   const badDest = await askSpecialist({ childModel: 'unknown/model' });
   assert.equal(badDest.ok, false);
   assert.equal(badDest.status, 'denied');
-  // Wrong workspace is denied
+  // 6. Wrong workspace is denied
   const wrongCwd = await askSpecialist({ cwd: tmpdir() });
   assert.equal(wrongCwd.ok, false);
   assert.equal(wrongCwd.status, 'denied');
+  // 7. Wrong session is denied
+  const wrongSession = await askSpecialist({ sessionId: 'other-session' });
+  assert.equal(wrongSession.ok, false);
+  assert.equal(wrongSession.status, 'denied');
+  // 8. Authorize callback refusal denies even with matching attachment
+  const refusedAuth = await askSpecialist({ authorize: async () => false });
+  assert.equal(refusedAuth.ok, false);
+  assert.equal(refusedAuth.status, 'denied');
 });
