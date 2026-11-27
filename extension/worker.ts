@@ -17,10 +17,17 @@ import { bindTaskDispatch, finishTaskDispatch, type CleanupState, type DispatchR
 import { bindTaskHistory } from './task-history.ts';
 import { scoutOwner } from './owner.ts';
 import { workspaceIdentity, rememberWorkspaceBrief } from '../lib/workspace-briefs.mjs';
+import { chooseResearchModel } from '../lib/research-model.mjs';
 import { loadEcosystemConfig } from '../lib/ecosystem-config.mjs';
 import { fetchPublicOfficialPages } from '../lib/direct-fetch.mjs';
 
 export default function scoutWorker(pi: ExtensionAPI) {
+  const unsubscribeModelSettings = pi.events?.on?.('scout:model-settings:v1', (probe: any) => {
+    try { probe?.report?.(); } catch { /* Optional settings probe cannot fail Scout. */ }
+  });
+  pi.on?.('session_shutdown', () => {
+    unsubscribeModelSettings?.();
+  });
   const captureOwner = scoutOwner(pi);
   const configuration = Object.fromEntries(['PI_SCOUT_WORKER_IMAGE', 'PI_SCOUT_WORKER_MODE',
     'PI_SCOUT_DOCKER_PATH', 'PI_SCOUT_DOCKER_HOST'].flatMap(key =>
@@ -40,51 +47,38 @@ export default function scoutWorker(pi: ExtensionAPI) {
         description: 'Known exact public HTTPS source URLs; no credentials or fragments. Public mode only. These are retrieval targets, not proof of official ownership or evidence already checked.' })),
     }, { additionalProperties: false }),
     async execute(_id, args, signal, update, ctx) {
-      if (!ctx.model) throw new Error('Select a Pi model before invoking Scout');
       if (cleanupBlocked) throw new Error('An earlier Scout setup, worker or model request did not settle. Inspect Docker and the recorded cleanup status before starting another Scout session.');
       if (busy) throw new Error('A Scout worker is already running in this Pi session');
-      // Prefer fast/cheap extraction model when configured via PI_SCOUT_MODEL or PI_ECO_MODEL_FAST;
-      // validate explicit PI_SCOUT_MODEL and PI_SCOUT_THINKING instead of silently falling back.
       const ecoCfg = loadEcosystemConfig(process.env);
-      const ALLOWED_THINKING = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
-      const explicitModel = process.env.PI_SCOUT_MODEL?.trim();
-      const configuredFast = explicitModel || process.env.PI_ECO_MODEL_FAST?.trim() || ecoCfg?.models?.fast?.trim();
-      let selectedModel = ctx.model;
-      if (configuredFast) {
-        const sep = configuredFast.includes('/') ? '/' : ':';
-        const idx = configuredFast.indexOf(sep);
-        const provider = idx > 0 ? configuredFast.slice(0, idx).trim() : '';
-        const modelId = idx > 0 ? configuredFast.slice(idx + 1).trim() : '';
-        if (!provider || !modelId) {
-          if (explicitModel) throw new Error('PI_SCOUT_MODEL must be provider/model');
-        } else if (typeof (ctx.modelRegistry as any)?.find === 'function') {
-          const found = (ctx.modelRegistry as any).find(provider, modelId);
-          if (found) selectedModel = found;
-          else if (explicitModel) throw new Error(`PI_SCOUT_MODEL "${explicitModel}" was not found in Pi model registry`);
-        }
-      }
-      const explicitThinking = process.env.PI_SCOUT_THINKING?.trim();
-      if (explicitThinking !== undefined && explicitThinking !== '' && !ALLOWED_THINKING.has(explicitThinking)) {
-        throw new Error(`PI_SCOUT_THINKING must be one of: ${[...ALLOWED_THINKING].join(', ')}`);
-      }
-      const parentThinking = pi.getThinkingLevel();
-      const thinking = (explicitThinking || (parentThinking === 'off' ? 'off' : 'low')) as typeof parentThinking;
-      const effectiveCtx = selectedModel === ctx.model ? ctx : { ...ctx, model: selectedModel };
       const owner = captureOwner(ctx);
+      busy = true;
+      let selectedModel: any;
+      let thinking: any;
+      try {
+        ({ model: selectedModel, thinking } = await chooseResearchModel(ctx, pi.getThinkingLevel(), ecoCfg, process.env, signal));
+        signal?.throwIfAborted();
+        if (!owner.current()) throw Error('Session changed during Scout model selection.');
+        if (cleanupBlocked) throw Error('An earlier Scout setup, worker or model request did not settle. Inspect Docker and the recorded cleanup status before starting another Scout session.');
+      } catch (err) {
+        busy = false;
+        throw err;
+      }
+      const effectiveCtx = selectedModel === ctx.model ? ctx : { ...ctx, model: selectedModel };
       const record = bindTaskHistory(pi.events, 'scout', ctx);
       const admit = bindTaskDispatch(pi.events, 'scout', ctx);
       let reservation: DispatchReceipt | undefined;
       let cleanup: CleanupState = 'not-started';
       let requestId: string | undefined;
       let phase = 'setup';
-      busy = true;
       try {
         await record(_id, 'worker-brief', 'observed', 'Research worker requested.');
         signal?.throwIfAborted();
         if (!owner.current()) throw Error('Session changed before worker setup.');
         const workspace = await workspaceIdentity(ctx.cwd).catch(() => undefined);
         observe(ctx, 'running', ['Preparing isolated research worker.']);
-        const destination = await destinationIdentity(effectiveCtx);
+        const fencingCtx = ctx.model ? ctx : effectiveCtx;
+        const destination = await destinationIdentity(fencingCtx);
+        const researchDestination = selectedModel === fencingCtx.model ? destination : await destinationIdentity(effectiveCtx);
         let sources = [];
         if (process.env.PI_SCOUT_CATALOG) {
           try {
@@ -110,7 +104,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         signal?.throwIfAborted();
         if (!owner.current()) throw Error('Session changed before worker setup.');
         cleanup = 'unknown';
-        const directAllowed = process.env.PI_SCOUT_DIRECT_URLS === '1' || ecoCfg?.scout?.directUrls === true;
+        const directAllowed = (ecoCfg?.scout?.directUrls ?? (process.env.PI_SCOUT_DIRECT_URLS === '1')) === true;
         let workerPrep;
         try {
           workerPrep = await prepareWorker({ env: configuration, signal,
@@ -126,18 +120,21 @@ export default function scoutWorker(pi: ExtensionAPI) {
             ['DOCKER_MISSING', 'DOCKER_UNAVAILABLE'].includes(setupErr?.code)
           ) {
             cleanup = 'not-started';
+            phase = 'research';
             const pages = await fetchPublicOfficialPages({
               question: args.question,
               scope: args.scope,
               sourceUrls: args.sourceUrls,
               signal,
             });
+            if (signal?.aborted) throw scoutFailure('CANCELLED');
+            if (!pages.some(p => p.passages?.some(w => w.text.trim()))) throw scoutFailure('SOURCE_FETCH_FAILED');
             const excerptBlocks = pages.map((p: any, i: number) =>
               p.error
                 ? `Source ${i + 1} (${p.url}): FAILED (${p.error})`
                 : `Source ${i + 1} (${p.url}):\n${p.passages.map((w: any) => w.text.slice(0, 2000)).join('\n---\n')}`,
             ).join('\n\n');
-            const summaryStream = ctx.modelRegistry.streamSimple(selectedModel, {
+            const context = {
               messages: [{
                 role: 'user',
                 content: [{
@@ -146,12 +143,24 @@ export default function scoutWorker(pi: ExtensionAPI) {
                 }],
                 timestamp: Date.now(),
               }],
-            } as any, { signal, reasoning: 'low' });
-            const msg = await summaryStream.result();
-            const answerText = (msg?.content ?? []).filter((c: any) => c?.type === 'text').map((c: any) => c.text).join('\n').trim();
+            };
+            let msg;
+            try {
+              msg = await ctx.modelRegistry.streamSimple(selectedModel, context as any,
+                { signal, ...(thinking === 'off' ? {} : { reasoning: thinking }) }).result();
+            } catch {
+              throw scoutFailure(signal?.aborted ? 'CANCELLED' : 'MODEL_REQUEST_FAILED');
+            }
+            if (signal?.aborted) throw scoutFailure('CANCELLED');
+            if (msg?.stopReason === 'aborted') throw scoutFailure('CANCELLED');
+            if (msg?.stopReason === 'error') throw scoutFailure('MODEL_REQUEST_FAILED');
+            if (!msg || !Array.isArray(msg.content)) throw scoutFailure('MODEL_RESPONSE_INVALID');
+            if (msg.stopReason !== 'stop') throw scoutFailure('MODEL_INCOMPLETE');
+            const answerText = msg.content.filter(c => c?.type === 'text' && typeof c.text === 'string').map(c => c.text).join('\n').trim();
+            if (!answerText) throw scoutFailure('ANSWER_MISSING');
             observe(ctx, 'settled', ['Direct HTTPS official-docs fetch completed (Docker unavailable).']);
             return {
-              content: [{ type: 'text', text: `[Scout Direct HTTPS Mode — Docker unavailable]\n\n${answerText || '(no answer)'}` }],
+              content: [{ type: 'text', text: `[Scout Direct HTTPS Mode - Docker unavailable]\n\n${answerText}` }],
               details: { mode: 'direct-urls', pages: pages.map((p: any) => ({ url: p.url, ok: !p.error, error: p.error })) },
             };
           }
@@ -162,9 +171,10 @@ export default function scoutWorker(pi: ExtensionAPI) {
         const completed = await runScout({ request, image, signal,
           dockerPath, dockerArgs,
           discoveryOrder: braveOrder(process.env),
-          onDiscoveryFallback: destination && braveDiscovery(request, { env: process.env,
+          onDiscoveryFallback: destination && researchDestination && braveDiscovery(request, { env: process.env,
             authorized: async () => owner.current() &&
-              JSON.stringify(await destinationIdentity(effectiveCtx)) === JSON.stringify(destination) && owner.current() }),
+              JSON.stringify(await destinationIdentity(effectiveCtx)) === JSON.stringify(researchDestination) &&
+              JSON.stringify(await destinationIdentity(fencingCtx)) === JSON.stringify(destination) && owner.current() }),
           onProgress: ({ stage }: { stage: string }) => update?.({ content: [{ type: 'text', text: `Scout: ${stage}` }], details: { stage } }),
           onModelRequest: async (context: unknown, modelSignal: AbortSignal) => {
             // Pi resolves the selected provider and credentials in the parent.
@@ -190,7 +200,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         record(_id, 'worker-brief', incomplete ? 'partial' : completed.result.status === 'complete' ? 'recorded' : 'unconfirmed',
           `Worker research brief saved with ${completed.result.brief.findings.length} findings and ${completed.result.brief.gaps.length} gaps.`, { type: 'brief', id: saved.reference.sha256 });
         // Preserve the pre-append destination/owner fence, then recheck after optional indexing.
-        await destinationIdentity(effectiveCtx);
+        await destinationIdentity(fencingCtx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
         const retained = { requestId: request.requestId,
@@ -202,7 +212,7 @@ export default function scoutWorker(pi: ExtensionAPI) {
         const indexed = workspace && await rememberWorkspaceBrief(briefs.root, workspace, { ...retained, kind: 'worker' }, { authorize: owner.current });
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
-        const currentDestination = await destinationIdentity(effectiveCtx);
+        const currentDestination = await destinationIdentity(fencingCtx);
         if (!owner.current()) return { content: [{ type: 'text', text: 'Scout retained a research record for the previous session branch under its original owner; output is withheld from the new branch.' }],
           details: { outputWithheld: true, reason: 'owner-changed', cleanup: completed.runtime.cleanup } };
         observe(ctx, incomplete ? 'observed' : 'settled', [incomplete

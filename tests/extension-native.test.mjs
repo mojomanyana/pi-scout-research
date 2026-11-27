@@ -54,6 +54,42 @@ async function fixture(t, callback, setup = async ({ env }) => ({ image: env.PI_
     setThinking: value => { thinking = value; } };
 }
 
+test('direct HTTPS reports source, provider and answer failures before publishing success', enabled, async t => {
+  const agentDir = await mkdtemp(join(tmpdir(), 'scout-direct-profile-'));
+  t.after(() => rm(agentDir, { recursive: true, force: true }));
+  const fx = await fixture(t, () => assert.fail('unexpected Docker dispatch'), async () => {
+    throw Object.assign(new Error('fixture'), {code:'DOCKER_UNAVAILABLE'});
+  }, {PI_SCOUT_WORKER_MODE:'public', PI_SCOUT_DIRECT_URLS:'1', PI_CODING_AGENT_DIR:agentDir});
+  let fetchOk = true;
+  t.mock.method(globalThis, 'fetch', async () => new Response(fetchOk ? 'Fixture evidence' : '', {status:fetchOk ? 200 : 503}));
+  let response, calls = 0;
+  const ctx = {model, modelRegistry:{
+    streamSimple() { calls++; return response(); },
+  }, sessionManager:{getSessionId:()=>'direct',getBranch:()=>fx.entries}};
+  const run = () => fx.tool.execute('direct', {question:'Find fixture evidence',scope:'Fixture',
+    sourceUrls:['https://93.184.216.34/fixture']},new AbortController().signal,undefined,ctx);
+  const message = (text, stopReason = 'stop') => () => ({result:async()=>({stopReason,content:[{type:'text',text}]})});
+  const fail = () => { throw Error('private-provider-diagnostic'); };
+  for (const [reply, expected] of [[message('   '),'ANSWER_MISSING'],[fail,'MODEL_REQUEST_FAILED'],
+    [message('private-provider-diagnostic','error'),'MODEL_REQUEST_FAILED'],
+    [()=>({result:async()=>fail()}),'MODEL_REQUEST_FAILED'],[message('partial','length'),'MODEL_INCOMPLETE']]) {
+    response = reply;
+    const result = await run();
+    assert.equal(result.isError,true);
+    assert.equal(result.details.failure.code,expected);
+    assert.equal(fx.entries.at(-1).data.code,expected);
+    assert.doesNotMatch(JSON.stringify(result),/private-provider-diagnostic/);
+  }
+  response = message('Fixture answer');
+  const success = await run();
+  assert.equal(success.details.mode,'direct-urls');
+  assert.match(success.content[0].text,/Fixture answer/);
+  fetchOk = false;
+  const before = calls;
+  assert.equal((await run()).details.failure.code,'SOURCE_FETCH_FAILED');
+  assert.equal(calls,before);
+});
+
 test('Scout extension loads through the selected native Pi SDK and exposes question/scope plus optional source URLs', enabled, async () => {
   const { loadExtensions } = await sdkImport('dist/core/extensions/loader.js');
   const loaded = await loadExtensions([join(product, 'extension', 'worker.ts')], product);
@@ -89,7 +125,10 @@ test('native public discovery uses the host secret and rechecks the initiating d
       questions: [], doneWhen: 'Read source', findings: [], gaps: ['Original not fetched'] } },
       runtime: { cleanup: { confirmed: true }, modelCallbackSettled: true } };
   }, undefined, { PI_SCOUT_WORKER_MODE: 'public', BRAVE_API_KEY: 'fixture-only-discovery-key' });
-  const ctx = { model, modelRegistry: { getApiKeyAndHeaders: async () => mode === 'unknown' ? { ok: false } : { ok: true, baseUrl: selectedEndpoint } },
+  const ctx = { model, modelRegistry: { getApiKeyAndHeaders: async () => {
+    if (mode === 'disconnected') return { ok: false };
+    return { ok: true, baseUrl: mode === 'unknown' ? '' : selectedEndpoint };
+  } },
     sessionManager: { getSessionId: () => 'fixture-session', getBranch: () => fx.entries } };
   for (mode of ['available', 'changed', 'unknown']) {
     const result = await fx.tool.execute(mode, { question: 'Public question?', scope: 'Fixture' }, new AbortController().signal, undefined, ctx);
@@ -98,6 +137,10 @@ test('native public discovery uses the host secret and rechecks the initiating d
     assert.equal(calls, 1);
     assert.doesNotMatch(JSON.stringify(result), /fixture-only-discovery-key/);
   }
+  mode = 'disconnected';
+  await assert.rejects(fx.tool.execute(mode, { question: 'Public question?', scope: 'Fixture' },
+    new AbortController().signal, undefined, ctx), /Scout model session is unavailable/);
+  assert.equal(calls, 1);
 });
 
 test('selected Pi chat catalog metadata is accepted without credential-bearing fields', enabled, async () => {
@@ -147,6 +190,18 @@ test('native-loaded extension captures model, forwards only worker context, save
     modelRegistry: { streamSimple: (...args) => { calls.push(args); return { result: async () => ({ stopReason: 'stop' }) }; } },
     sessionManager: { getSessionId: () => 'fixture-session', getBranch: () => fx.entries } };
   const signal = new AbortController().signal;
+  const cancelled = new AbortController();
+  const opened = Promise.withResolvers();
+  const picker = { ...ctx, model: undefined, hasUI: true, modelRegistry: { getAvailable: () => [model] },
+    ui: { select: (_title, _choices, opts) => {
+      assert.equal(opts?.signal, cancelled.signal);
+      opened.resolve();
+      return new Promise(done => opts.signal.addEventListener('abort', () => done(undefined), { once: true }));
+    } } };
+  const picking = fx.tool.execute('pick', { question: 'Choose a model', scope: 'Public' }, cancelled.signal, undefined, picker);
+  await Promise.race([opened.promise, picking]);
+  cancelled.abort();
+  await assert.rejects(picking, { name: 'AbortError' });
   const resultPromise = fx.tool.execute('one', { question: 'Public fixture question', scope: 'Public fixture scope' }, signal, undefined, ctx);
   await entered;
   await assert.rejects(fx.tool.execute('two', { question: 'Another', scope: 'Public' }, signal, undefined, ctx), /already running/);
@@ -299,15 +354,16 @@ test('unsettled setup prevents duplicate builds or worker launches in the same s
 
 test('session or branch changes during worker completion withhold output and do not grant the new branch a reference', enabled, async t => {
   for (const phase of ['worker', 'final-destination']) {
-    let fx, ctx, lookups = 0;
+    let fx, ctx, workerFinished = false;
     const change = async () => { for (const handler of fx.extension.handlers.get('session_tree')) await handler({},ctx); };
     fx = await fixture(t, async () => {
       if (phase === 'worker') await change();
+      workerFinished = true;
       return { result: { answer:'Original branch answer',brief:{version:1,question:'Original branch question',scope:'Fixture',
         questions:[],doneWhen:'Report',findings:[],gaps:[]} },runtime:{cleanup:{confirmed:true},modelCallbackSettled:true} };
     });
     ctx = {cwd:fx.root,model,modelRegistry:{getApiKeyAndHeaders:async()=>{
-      if (++lookups === 2 && phase === 'final-destination') await change();
+      if (workerFinished && phase === 'final-destination') await change();
       return {ok:true,baseUrl:'https://provider.invalid'};
     }},sessionManager:{getSessionId:()=> 'original-owner',getBranch:()=>fx.entries}};
     const result = await fx.tool.execute('one',{question:'Public',scope:'Fixture'},new AbortController().signal,undefined,ctx);
