@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.0 - 2026-11-27
+
+- Choose a research model and thinking level in Settings, or use the active Pi model. An unavailable model opens a replacement picker. Cancelling releases Scout for the next request.
+- Direct HTTPS research reports missing answers and provider failures explicitly.
+
 ## 1.0.2 - 2026-11-25
 
 - Page oversized source lines without splitting Unicode characters.
