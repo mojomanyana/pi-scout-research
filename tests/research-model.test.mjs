@@ -40,3 +40,18 @@ test('failed replacement selection names the chosen replacement model', async ()
     /Selected Scout replacement model local\/vendor\/name is unavailable/,
   );
 });
+
+test('aborting an open replacement picker dismisses it and releases the request', async () => {
+  const controller = new AbortController();
+  const opened = Promise.withResolvers();
+  const ui = { select: (_title, _choices, options) => {
+    assert.equal(options?.signal, controller.signal);
+    opened.resolve();
+    return new Promise(resolve => options.signal.addEventListener('abort', () => resolve(undefined), {once: true}));
+  }};
+  const request = chooseResearchModel({...ctx, hasUI:true, ui}, 'low', {scout:{model:'lost/model'}}, {}, controller.signal);
+  await Promise.race([opened.promise, request]);
+  controller.abort();
+  await assert.rejects(request, {name:'AbortError'});
+  assert.equal((await chooseResearchModel(ctx, 'low')).model, current);
+});

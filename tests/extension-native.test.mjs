@@ -190,6 +190,18 @@ test('native-loaded extension captures model, forwards only worker context, save
     modelRegistry: { streamSimple: (...args) => { calls.push(args); return { result: async () => ({ stopReason: 'stop' }) }; } },
     sessionManager: { getSessionId: () => 'fixture-session', getBranch: () => fx.entries } };
   const signal = new AbortController().signal;
+  const cancelled = new AbortController();
+  const opened = Promise.withResolvers();
+  const picker = { ...ctx, model: undefined, hasUI: true, modelRegistry: { getAvailable: () => [model] },
+    ui: { select: (_title, _choices, opts) => {
+      assert.equal(opts?.signal, cancelled.signal);
+      opened.resolve();
+      return new Promise(done => opts.signal.addEventListener('abort', () => done(undefined), { once: true }));
+    } } };
+  const picking = fx.tool.execute('pick', { question: 'Choose a model', scope: 'Public' }, cancelled.signal, undefined, picker);
+  await Promise.race([opened.promise, picking]);
+  cancelled.abort();
+  await assert.rejects(picking, { name: 'AbortError' });
   const resultPromise = fx.tool.execute('one', { question: 'Public fixture question', scope: 'Public fixture scope' }, signal, undefined, ctx);
   await entered;
   await assert.rejects(fx.tool.execute('two', { question: 'Another', scope: 'Public' }, signal, undefined, ctx), /already running/);
