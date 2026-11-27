@@ -23,3 +23,20 @@ test('a configured model whose credentials cannot resolve prompts before dispatc
   const choice=await chooseResearchModel({...ctx,modelRegistry,ui,hasUI:true},'low',{},{});
   assert.equal(choice.model,local); assert.equal(prompts,1);
 });
+
+test('empty/whitespace config values fall back cleanly and null config/env do not throw', async () => {
+  assert.deepEqual(await chooseResearchModel(ctx, 'medium', { scout: { model: '  ', thinking: '' } }, {}), { model: current, thinking: 'low' });
+  assert.deepEqual(await chooseResearchModel(ctx, 'off', null, null), { model: current, thinking: 'off' });
+  const aborted = new AbortController();
+  aborted.abort();
+  await assert.rejects(chooseResearchModel(ctx, 'low', {}, {}, aborted.signal));
+});
+
+test('failed replacement selection names the chosen replacement model', async () => {
+  const modelRegistry = { ...registry, getApiKeyAndHeaders: async () => ({ ok: false }) };
+  const ui = { select: async () => 'local/vendor/name' };
+  await assert.rejects(
+    chooseResearchModel({ ...ctx, modelRegistry, hasUI: true, ui }, 'low', { scout: { model: 'lost/model' } }, {}),
+    /Selected Scout replacement model local\/vendor\/name is unavailable/,
+  );
+});
