@@ -1,18 +1,50 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { chooseResearchModel } from '../lib/research-model.mjs';
 const current = { provider: 'codex', id: 'sol' }, local = { provider: 'local', id: 'vendor/name' };
 const registry = {find: (p,id) => p === local.provider && id === local.id ? local : undefined, getAvailable: () => [current,local], hasConfiguredAuth: () => true};
 const ctx = { model: current, modelRegistry: registry };
 test('session wins over unavailable FAST, saved selection beats a legacy override', async () => {
-  assert.deepEqual(await chooseResearchModel(ctx,'medium',{models:{fast:'fireworks/unavailable'}},{}),{model:current,thinking:'low'});
-  assert.deepEqual(await chooseResearchModel(ctx,'medium',{scout:{model:'local/vendor/name',thinking:'off'}},{PI_SCOUT_MODEL:'old/missing'}),{model:local,thinking:'off'});
+  const first = await chooseResearchModel(ctx,'medium',{models:{fast:'fireworks/unavailable'}},{});
+  assert.deepEqual({ model: first.model, thinking: first.thinking }, {model:current,thinking:'low'});
+  const second = await chooseResearchModel(ctx,'medium',{scout:{model:'local/vendor/name',thinking:'off'}},{PI_SCOUT_MODEL:'old/missing'});
+  assert.deepEqual({ model: second.model, thinking: second.thinking }, {model:local,thinking:'off'});
 });
-test('unavailable model offers a replacement for this request, cancellation gives an actionable error',async () => {
+test('unavailable model offers Use session model once and Choose a new default, cancellation gives an actionable error',async () => {
   const cfg = {scout:{model:'lost/model'}};
-  const pick = (answer) => ({...ctx,hasUI:true,ui:{select:async (_,ids)=>{assert.deepEqual(ids,['codex/sol','local/vendor/name']);return answer}}});
-  assert.equal((await chooseResearchModel(pick('codex/sol'),'off',cfg,{})).model,current);
-  await assert.rejects(chooseResearchModel(pick(undefined),'off',cfg,{}),/Settings/);
+  const pickOnce = () => ({...ctx,hasUI:true,ui:{select:async (_title,options)=>{
+    assert.deepEqual(options,['Use session model once (codex/sol)','Choose a new default']);
+    return options[0];
+  }}});
+  const once = await chooseResearchModel(pickOnce(),'off',cfg,{});
+  assert.equal(once.model,current);
+  assert.equal(once.recovered,'once');
+
+  // Choose a new default selects from compatible configured models and persists it
+  const tempDir = mkdtempSync(join(tmpdir(), 'scout-model-cfg-'));
+  try {
+    let step = 0;
+    const pickDefault = () => ({...ctx,hasUI:true,ui:{select:async (_title,options)=>{
+      step++;
+      if (step === 1) return 'Choose a new default';
+      assert.deepEqual(options,['codex/sol','local/vendor/name']);
+      return 'local/vendor/name';
+    }}});
+    const saved = await chooseResearchModel(pickDefault(),'off',cfg,{PI_CODING_AGENT_DIR:tempDir});
+    assert.equal(saved.model,local);
+    assert.equal(saved.recovered,'default');
+    assert.equal(saved.savedDefault,'local/vendor/name');
+    const persisted = JSON.parse(readFileSync(join(tempDir, 'ecosystem.json'), 'utf8'));
+    assert.equal(persisted.scout.model, 'local/vendor/name');
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  const pickCancel = () => ({...ctx,hasUI:true,ui:{select:async ()=>undefined}});
+  await assert.rejects(chooseResearchModel(pickCancel(),'off',cfg,{}),/Settings/);
   await assert.rejects(chooseResearchModel(ctx,'off',cfg,{}),/login/);
 });
 

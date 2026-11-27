@@ -85,3 +85,58 @@ test('native local save/read and trusted peer resolver enforce branch, destinati
   await assert.rejects(again.assertCurrent(),/no longer/);
   assert.equal((await resolveRef({authorize:exact})).status,'denied');
 });
+
+test('assigned specialist can read attached Scout brief across configured local model and emits attribution', enabled, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'scout-specialist-ref-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const before = process.env.PI_SCOUT_BRIEFS;
+  process.env.PI_SCOUT_BRIEFS = join(root, 'briefs');
+  t.after(() => { before === undefined ? delete process.env.PI_SCOUT_BRIEFS : process.env.PI_SCOUT_BRIEFS = before; });
+  const { loadExtensions, createExtensionRuntime } = await import(pathToFileURL(resolve(host,'dist/core/extensions/loader.js')));
+  const { createEventBus } = await import(pathToFileURL(resolve(host,'dist/core/event-bus.js')));
+  const bus = createEventBus(), runtime = createExtensionRuntime(), entries = [];
+  runtime.appendEntry = (customType, data) => entries.push({type:'custom',customType,data});
+  const loaded = await loadExtensions([join(product,'extension/index.ts'),join(product,'extension/briefs.ts')],root,bus,runtime);
+  assert.deepEqual(loaded.errors, []);
+  const [local, reader] = loaded.extensions;
+  const primaryModel = { provider:'fixture', id:'primary', api:'fixture', baseUrl:'https://provider.example/v1' };
+  const localModel = { provider:'ollama', id:'qwen3:32b', api:'openai', baseUrl:'http://127.0.0.1:11434/v1' };
+  const ctx = {
+    cwd: root,
+    model: primaryModel,
+    modelRegistry: {
+      find: (p, id) => (p === 'ollama' && id === 'qwen3:32b' ? localModel : p === 'fixture' && id === 'primary' ? primaryModel : undefined),
+      hasConfiguredAuth: () => true,
+      getApiKeyAndHeaders: async (m) => ({ ok: Boolean(m), baseUrl: m?.baseUrl, apiKey: 'never-retained' }),
+    },
+    sessionManager: { getSessionId: () => 'specialist-session', getBranch: () => entries },
+  };
+  for (const h of reader.handlers.get('session_start')) await h({}, ctx);
+  const saved = (await local.tools.get('research_brief').definition.execute('c1', {
+    question: 'Check API', scope: 'Docs', questions: [], doneWhen: 'Done', findings: [], gaps: ['None'],
+  }, new AbortController().signal, undefined, ctx)).details;
+  const events = [];
+  bus.on('pi-daddy:ecosystem-activity:v1', (ev) => events.push(ev));
+  const askSpecialist = (extra = {}) => new Promise(reply => bus.emit('scout:specialist-brief-read:v1', {
+    version: 1, requestId: 'req-1', sessionId: 'specialist-session', cwd: root,
+    specialist: 'investigate', childModel: 'ollama/qwen3:32b',
+    attachedBriefSha256: [saved.reference.sha256], reference: saved.reference, reply, ...extra,
+  }));
+  const ok = await askSpecialist();
+  assert.equal(ok.ok, true);
+  assert.equal(ok.result.specialist, 'investigate');
+  assert.match(ok.result.excerpt, /Check API/);
+  assert.ok(events.some(e => e.specialist === 'investigate' && /investigate read brief/.test(e.detail)));
+  // Unattached brief is denied
+  const unattached = await askSpecialist({ attachedBriefSha256: ['0'.repeat(64)] });
+  assert.equal(unattached.ok, false);
+  assert.equal(unattached.status, 'denied');
+  // Unconfigured destination model is denied
+  const badDest = await askSpecialist({ childModel: 'unknown/model' });
+  assert.equal(badDest.ok, false);
+  assert.equal(badDest.status, 'denied');
+  // Wrong workspace is denied
+  const wrongCwd = await askSpecialist({ cwd: tmpdir() });
+  assert.equal(wrongCwd.ok, false);
+  assert.equal(wrongCwd.status, 'denied');
+});

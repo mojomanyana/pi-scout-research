@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { realpath } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { branchAuthorization, destinationIdentity, readBriefReference, referenceKey } from '../lib/brief-reference.mjs';
+import { branchAuthorization, branchReferences, destinationIdentity, readBriefReference, referenceKey } from '../lib/brief-reference.mjs';
 
 const hash = Type.String({ pattern: '^[a-f0-9]{64}$' });
 const schema = Type.Object({ version: Type.Literal(1), producer: Type.Literal('pi-scout-research'),
@@ -48,6 +48,59 @@ export default function scoutBriefs(pi: ExtensionAPI) {
           return allowed && !signal?.aborted && epoch === observed;
         } }));
     },
+  });
+  // Assigned specialists can read attached Scout briefs across configured/local models after
+  // rechecking workspace, assignment, destination, and active branch permissions at read time.
+  const validSpecialistName = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0 && v.length <= 120 && !/[\x00-\x1f\x7f]/.test(v);
+  const validAssignedDestination = async (ctx: ExtensionContext, dest: unknown): Promise<boolean> => {
+    if (!dest) return Boolean(await destinationIdentity(ctx));
+    if (typeof dest !== 'string' || !/^[^/\s]+\/[^\s]+$/.test(dest)) return false;
+    const slash = dest.indexOf('/');
+    const provider = dest.slice(0, slash), id = dest.slice(slash + 1);
+    const model = ctx.modelRegistry?.find?.(provider, id);
+    if (!model) return false;
+    if (ctx.modelRegistry?.hasConfiguredAuth?.(model) === false) return false;
+    const resolved = await destinationIdentity({ ...ctx, model });
+    return Boolean(resolved);
+  };
+  pi.events.on('scout:specialist-brief-read:v1', async (request: any) => {
+    if (request?.version !== 1 || typeof request.requestId !== 'string' || request.requestId.length > 200 || typeof request.reply !== 'function') return;
+    const specialist = validSpecialistName(request.specialist) ? request.specialist.trim() : '';
+    const identity = { version: 1, requestId: request.requestId, specialist,
+      sessionId: typeof request.sessionId === 'string' && request.sessionId.length <= 256 ? request.sessionId : '',
+      cwd: typeof request.cwd === 'string' && request.cwd.length <= 4096 ? request.cwd : '' };
+    const ctx = owner, observed = epoch;
+    try {
+      if (!ctx || !specialist || request.sessionId !== ctx.sessionManager.getSessionId() || await realpath(request.cwd) !== await realpath(ctx.cwd))
+        return request.reply({ ...identity, ok: false, status: 'denied', reason: 'workspace or session mismatch' });
+      const attached = Array.isArray(request.attachedBriefSha256) ? new Set(request.attachedBriefSha256.filter((x: unknown) => typeof x === 'string')) : null;
+      const key = referenceKey(request.reference);
+      const sha = request.reference?.sha256;
+      if (attached && (!sha || !attached.has(sha)))
+        return request.reply({ ...identity, ok: false, status: 'denied', reason: 'brief is not attached to this specialist assignment' });
+      if (!(await validAssignedDestination(ctx, request.childModel)))
+        return request.reply({ ...identity, ok: false, status: 'denied', reason: 'specialist destination model is not authorized or configured' });
+      const authorize = async (reference: unknown) => {
+        const stillOwner = ctx === owner && epoch === observed && ctx.sessionManager.getSessionId() === request.sessionId;
+        if (!stillOwner || referenceKey(reference) !== key) return false;
+        const onBranch = branchReferences(ctx.sessionManager.getBranch()).some(item => referenceKey(item.reference) === key);
+        if (!onBranch) return false;
+        if (typeof request.authorize === 'function' && await request.authorize({ reference, specialist, cwd: ctx.cwd }) !== true) return false;
+        return ctx === owner && epoch === observed && await validAssignedDestination(ctx, request.childModel);
+      };
+      const value = await readBriefReference(root, request.reference, { offset: request.offset, maxBytes: request.maxBytes, authorize });
+      if (!value.ok) return request.reply({ ...identity, ...value });
+      try {
+        pi.events.emit('pi-daddy:ecosystem-activity:v1', {
+          producer: 'scout',
+          kind: 'scout-brief-read',
+          specialist,
+          briefSha256: value.reference.sha256,
+          detail: `Scout · ${specialist} read brief ${value.reference.sha256.slice(0, 8)}`,
+        });
+      } catch { /* Optional activity feed cannot break brief reads. */ }
+      request.reply({ ...identity, ok: true, result: { ...value, specialist, usedBySpecialist: specialist } });
+    } catch { request.reply({ ...identity, ok: false, status: 'unavailable' }); }
   });
   // Trusted peer extensions use closures; no model argument grants disclosure.
   pi.events.on('scout:resolve:v1', async (request: any) => {

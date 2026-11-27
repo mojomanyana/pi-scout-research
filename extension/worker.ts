@@ -218,6 +218,16 @@ export default function scoutWorker(pi: ExtensionAPI) {
         observe(ctx, incomplete ? 'observed' : 'settled', [incomplete
           ? 'Partial findings saved; gaps remain. Worker cleanup confirmed. No human decision is requested by this record.'
           : 'Worker cleanup confirmed; brief retained.', ...(indexed ? [] : ['Workspace inventory is incomplete; the saved branch reference remains usable.'])]);
+        try {
+          pi.events?.emit?.('pi-daddy:ecosystem-activity:v1', {
+            producer: 'scout',
+            kind: incomplete ? 'scout-brief-partial' : 'scout-brief-saved',
+            briefSha256: saved.reference.sha256,
+            detail: incomplete
+              ? `Scout · partial brief saved (${completed.result.brief.findings.length} findings, ${completed.result.brief.gaps.length} gaps)`
+              : `Scout · returned brief (${completed.result.brief.findings.length} findings, ${completed.result.brief.gaps.length} gaps)`,
+          });
+        } catch { /* Optional activity event cannot interrupt research. */ }
         if (JSON.stringify(currentDestination) !== JSON.stringify(destination)) {
           return { ...(incomplete ? { isError: true } : {}), content: [{ type: 'text', text: 'Scout saved its research record, but the model destination changed. Retrieve the exact reference only after authorizing the new destination.' }],
             details: { briefReference: saved.reference, outputWithheld: true, cleanup: completed.runtime.cleanup,
