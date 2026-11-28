@@ -85,3 +85,85 @@ test('native local save/read and trusted peer resolver enforce branch, destinati
   await assert.rejects(again.assertCurrent(),/no longer/);
   assert.equal((await resolveRef({authorize:exact})).status,'denied');
 });
+
+test('assigned specialist can read attached Scout brief across configured local model and emits attribution', enabled, async t => {
+  const root = await mkdtemp(join(tmpdir(), 'scout-specialist-ref-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const before = process.env.PI_SCOUT_BRIEFS;
+  process.env.PI_SCOUT_BRIEFS = join(root, 'briefs');
+  t.after(() => { before === undefined ? delete process.env.PI_SCOUT_BRIEFS : process.env.PI_SCOUT_BRIEFS = before; });
+  const { loadExtensions, createExtensionRuntime } = await import(pathToFileURL(resolve(host,'dist/core/extensions/loader.js')));
+  const { createEventBus } = await import(pathToFileURL(resolve(host,'dist/core/event-bus.js')));
+  const bus = createEventBus(), runtime = createExtensionRuntime(), entries = [];
+  runtime.appendEntry = (customType, data) => entries.push({type:'custom',customType,data});
+  const loaded = await loadExtensions([join(product,'extension/index.ts'),join(product,'extension/briefs.ts')],root,bus,runtime);
+  assert.deepEqual(loaded.errors, []);
+  const [local, reader] = loaded.extensions;
+  const primaryModel = { provider:'fixture', id:'primary', api:'fixture', baseUrl:'https://provider.example/v1' };
+  const localModel = { provider:'ollama', id:'qwen3:32b', api:'openai', baseUrl:'http://127.0.0.1:11434/v1' };
+  const ctx = {
+    cwd: root,
+    model: primaryModel,
+    modelRegistry: {
+      find: (p, id) => (p === 'ollama' && id === 'qwen3:32b' ? localModel : p === 'fixture' && id === 'primary' ? primaryModel : undefined),
+      hasConfiguredAuth: () => true,
+      getApiKeyAndHeaders: async (m) => ({ ok: Boolean(m), baseUrl: m?.baseUrl, apiKey: 'never-retained' }),
+    },
+    sessionManager: { getSessionId: () => 'specialist-session', getBranch: () => entries },
+  };
+  for (const h of reader.handlers.get('session_start')) await h({}, ctx);
+  const saved = (await local.tools.get('research_brief').definition.execute('c1', {
+    question: 'Check API', scope: 'Docs', questions: [], doneWhen: 'Done', findings: [], gaps: ['None'],
+  }, new AbortController().signal, undefined, ctx)).details;
+  const otherSaved = (await local.tools.get('research_brief').definition.execute('c2', {
+    question: 'Different topic', scope: 'Other docs', questions: [], doneWhen: 'Done', findings: [], gaps: ['None'],
+  }, new AbortController().signal, undefined, ctx)).details;
+  // Confirm target brief already exists on the active branch before testing denied assignment cases.
+  const directRead = await reader.tools.get('scout_brief_read').definition.execute('c3', { reference: saved.reference }, new AbortController().signal, undefined, ctx);
+  assert.equal(directRead.details.ok, true);
+  assert.equal(directRead.details.complete, true);
+  const events = [];
+  bus.on('pi-daddy:ecosystem-activity:v1', (ev) => events.push(ev));
+  const askSpecialist = (extra = {}) => new Promise(reply => bus.emit('scout:specialist-brief-read:v1', {
+    version: 1, requestId: 'req-1', sessionId: 'specialist-session', cwd: root,
+    specialist: 'investigate', childModel: 'ollama/qwen3:32b',
+    attachedBriefSha256: [saved.reference.sha256], reference: saved.reference, reply, ...extra,
+  }));
+  // 1. Authorized cross-model read succeeds and emits attribution
+  const ok = await askSpecialist();
+  assert.equal(ok.ok, true);
+  assert.equal(ok.result.specialist, 'investigate');
+  assert.match(ok.result.excerpt, /Check API/);
+  assert.ok(events.some(e => e.specialist === 'investigate' && /investigate read brief/.test(e.detail)));
+  // 2. Omitted attachment list fails closed even when brief is on active branch
+  const omitted = await askSpecialist({ attachedBriefSha256: undefined });
+  assert.equal(omitted.ok, false);
+  assert.equal(omitted.status, 'denied');
+  assert.match(omitted.reason, /absent/i);
+  // 3. Empty attachment list fails closed even when brief is on active branch
+  const empty = await askSpecialist({ attachedBriefSha256: [] });
+  assert.equal(empty.ok, false);
+  assert.equal(empty.status, 'denied');
+  assert.match(empty.reason, /no briefs are attached/i);
+  // 4. Different attached brief fails closed even when target brief is on active branch
+  const different = await askSpecialist({ attachedBriefSha256: [otherSaved.reference.sha256] });
+  assert.equal(different.ok, false);
+  assert.equal(different.status, 'denied');
+  assert.match(different.reason, /not attached/i);
+  // 5. Unconfigured destination model is denied
+  const badDest = await askSpecialist({ childModel: 'unknown/model' });
+  assert.equal(badDest.ok, false);
+  assert.equal(badDest.status, 'denied');
+  // 6. Wrong workspace is denied
+  const wrongCwd = await askSpecialist({ cwd: tmpdir() });
+  assert.equal(wrongCwd.ok, false);
+  assert.equal(wrongCwd.status, 'denied');
+  // 7. Wrong session is denied
+  const wrongSession = await askSpecialist({ sessionId: 'other-session' });
+  assert.equal(wrongSession.ok, false);
+  assert.equal(wrongSession.status, 'denied');
+  // 8. Authorize callback refusal denies even with matching attachment
+  const refusedAuth = await askSpecialist({ authorize: async () => false });
+  assert.equal(refusedAuth.ok, false);
+  assert.equal(refusedAuth.status, 'denied');
+});

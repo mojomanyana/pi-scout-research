@@ -9,6 +9,7 @@
   },
   "files": [
     "research",
+    "scout-public",
     "extension",
     "lib",
     "README.md",
@@ -26,7 +27,8 @@
   ],
   "pi": {
     "skills": [
-      "./research"
+      "./research",
+      "./scout-public"
     ],
     "extensions": [
       "./extension/index.ts",
@@ -35,7 +37,7 @@
     ]
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=1.4.0",
+    "@earendil-works/pi-coding-agent": ">=1.6.1",
     "typebox": "*"
   },
   "peerDependenciesMeta": {

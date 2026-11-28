@@ -17,8 +17,8 @@ jobs:
         run: >-
           npm install --prefix "$RUNNER_TEMP/scout-test-deps"
           --ignore-scripts --no-audit --no-fund --save-exact
-          @earendil-works/pi-coding-agent@1.5.2
-          @earendil-works/pi-ai@1.5.2 typebox@1.4.7 pi-daddy@0.59.1
+          @earendil-works/pi-coding-agent@1.6.1
+          @earendil-works/pi-ai@1.6.1 typebox@1.4.7 pi-daddy@1.2.0
       - name: Run offline controls without providers or Docker
         env:
           SCOUT_PI_SDK_ROOT: ${{ runner.temp }}/scout-test-deps/node_modules/@earendil-works/pi-coding-agent
